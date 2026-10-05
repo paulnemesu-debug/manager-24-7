@@ -1,0 +1,90 @@
+{
+  "version": "1.6.0",
+  "channel": "development",
+  "releaseReady": false,
+  "generatedAt": "2026-10-04T22:17:18.572Z",
+  "apk": {
+    "file": "manager24-7-v1.6.0-development.apk",
+    "versionName": "1.6.0",
+    "versionCode": 60,
+    "bytes": 47417248,
+    "sha256": "95eb911ae088de63b9a90197dd92701ba6d5a92330748026404877f03f3b7d76",
+    "architecture": "arm64-v8a",
+    "signatureVerified": true,
+    "zipAlignment16Kb": true,
+    "nativeElfAlignment16Kb": true,
+    "nativeLibrariesVerified": 27,
+    "hermesBytecode": true,
+    "operationalModulesIncluded": true,
+    "physicalDeviceTested": false
+  },
+  "validation": {
+    "tests": 402,
+    "testFiles": 66,
+    "componentScenarios": 53,
+    "flows": [
+      {
+        "file": "qa-results/folder-checks.json",
+        "passed": 6
+      },
+      {
+        "file": "qa-results/draft-flow-checks.json",
+        "passed": 9
+      },
+      {
+        "file": "qa-results/auth-haccp-checks.json",
+        "passed": 11
+      },
+      {
+        "file": "qa-results/nutrition-flow-checks.json",
+        "passed": 8
+      },
+      {
+        "file": "qa-results/commercial-flow-checks.json",
+        "passed": 13
+      },
+      {
+        "file": "qa-results/operational-flow-checks.json",
+        "passed": 6
+      }
+    ],
+    "processExitCodes": {
+      "vitest": 0,
+      "typescript": 0,
+      "eslint": 0,
+      "existingComponentFlows": 0,
+      "operationalComponentFlows": 0,
+      "releaseConfigAfterBuildFix": 0,
+      "prefabWithJdk17": 0,
+      "androidBuildAndApkVerification": 0
+    },
+    "database": {
+      "migrationApplied": "20261004185620_operational_documents_hr_lifecycle.sql",
+      "transactionTestsPassed": true,
+      "evidence": "qa-results/validation-1.6.0/database-tests.json",
+      "cases": [
+        "owner isolation",
+        "foreign employee protection",
+        "date validation",
+        "idempotent replay",
+        "concurrent version conflict",
+        "employee departure and legacy reactivation protection"
+      ]
+    }
+  },
+  "implemented": [
+    "Daily Operations integrated with Daily Manager and Control Mode",
+    "Complete HR onboarding/offboarding checklists",
+    "Account-scoped local persistence and cloud synchronization",
+    "Explicit conflict resolution and offline retry",
+    "Document renewal, archive and restore",
+    "Instant demo isolation from real accounts"
+  ],
+  "limitations": [
+    "Development APK signed with the local test certificate; not a Google Play release.",
+    "The APK was not tested on a physical Android device.",
+    "Live OTP, camera/OCR, native print/share, payments and Sentry crash ingestion were not exercised on a phone.",
+    "Browser preview did not complete validation; no browser pass is claimed.",
+    "No iOS binary was built."
+  ]
+}

@@ -1,0 +1,108 @@
+{
+  "version": "1.5.3",
+  "android_version_code": 57,
+  "zip_integrity": "passed",
+  "hermes_bytecode": "verified",
+  "native_libraries_16kb_aligned": 25,
+  "unchanged_assets_verified": 53,
+  "native_code": "unchanged from previous test APK; no full native rebuild",
+  "apk_bytes": 51893107,
+  "apk_sha256": "fbd168188b067aec1e0a4e5be00a905cdd515f97f920049cfa0e6adc7a5da90f",
+  "verified_on": "2026-10-04",
+  "automated_tests": {
+    "files_passed": 56,
+    "tests_passed": 336,
+    "tests_failed": 0
+  },
+  "typescript": "passed",
+  "lint": "passed_without_warnings",
+  "apk_signature_schemes": [
+    "v2",
+    "v3"
+  ],
+  "signer_sha256": "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+  "signer_matches_v1_5_2": true,
+  "interactive_navigation": {
+    "checks_passed": 6,
+    "checks": [
+      "four folders with distinct offline photos",
+      "2 by 2 fitted grid at four viewport sizes",
+      "accessible scrolling for large fonts",
+      "form state retained across closing and switching",
+      "Android back handler closes and cleans up",
+      "saving redirects to My recipes even for the same folder"
+    ],
+    "renderer": "React test renderer with native adapters",
+    "physical_device": false
+  },
+  "draft_editor_flows": {
+    "checks_passed": 9,
+    "checks": [
+      "typing persists a new draft and reopening restores the title",
+      "My recipes resumes the matching local draft",
+      "opening a completed recipe without edits creates no pending draft",
+      "a failed conflicting save retains the draft and refreshes cloud data",
+      "comparison confirmation rebases the save, clears the draft and returns to My recipes",
+      "camera permission denial shows feedback without launching capture",
+      "canceling photo selection keeps the original draft",
+      "selected photo persists in the draft and reappears after reopening",
+      "removing a photo stores an explicit removal intent"
+    ],
+    "renderer": "React test renderer using actual editor, recipe list and draft storage",
+    "native_adapters": true,
+    "physical_device": false
+  },
+  "authentication_and_haccp": {
+    "checks_passed": 11,
+    "checks": [
+      "invalid registration email is rejected before service invocation",
+      "valid email is normalized, sends one request and opens OTP entry",
+      "OTP cooldown prevents repeated service requests",
+      "invalid or expired OTP retains the email and allows another attempt",
+      "successful OTP verification routes through the main access gate",
+      "HACCP star toggles persist independently without opening the form",
+      "favorite selection survives reopening the HACCP screen",
+      "switching accounts hides the previous account favorites",
+      "favorite persistence failure retains the previous state and re-enables selection",
+      "HACCP search handles no results and Romanian diacritics",
+      "every HACCP form remains reachable across paginated results"
+    ],
+    "haccp_forms_reachable": 19,
+    "renderer": "Actual sign-in, HACCP browser and favorites hook",
+    "service_adapters": true,
+    "otp_email_sent": false,
+    "physical_device": false
+  },
+  "exports": {
+    "native_paths": "simulated with actual exporters and file/print/share adapters",
+    "xlsx_writer_and_reader": "real XLSX generated and reopened",
+    "haccp_forms_exported": 19,
+    "export_families": 13,
+    "native_print_visual_layout": "not_tested"
+  },
+  "server_read_checks": {
+    "scan_function_version": 3,
+    "scan_verify_jwt": true,
+    "private_recipe_photo_bucket": true,
+    "max_photo_bytes": 5242880,
+    "photo_policies": 4,
+    "atomic_photo_rpc_active": false,
+    "photo_rpc_migration": "prepared_not_applied: Invalid or expired requestState; legacy CAS attachment retained"
+  },
+  "full_native_build": "not_available: no Android SDK, emulator, adb or Android Studio in this environment; Gradle dependency download blocked in previous session",
+  "automatic_visual_verification": "not_run: cloud browser could not reach local preview (ERR_BLOCKED_BY_CLIENT); Chromium download failed",
+  "physical_device_installation": "not_tested",
+  "real_camera_gallery_and_sharing": "not_tested",
+  "real_otp_email_delivery": "not_tested",
+  "real_payments": "not_tested",
+  "scanner_provider_activation": "real scan not confirmed; ANTHROPIC_API_KEY was missing at previous verification, no provider credential supplied in this session",
+  "efactura_spv": "local XML import simulated; live ANAF/SPV integration not implemented",
+  "account_export_photo_files": "references only, no binary image archive",
+  "haccp_favorites_scope": "on this device, per account; included in account JSON export",
+  "pdf_report": {
+    "pages": 6,
+    "file": "manager24-7-v1.5.3-verificare.pdf",
+    "visually_reviewed": true
+  },
+  "native_library_alignment_verifier": "ZIP offsets and ELF alignment independently verified; SDK zipalign not used for final file"
+}

@@ -1,0 +1,38 @@
+{
+  "version": "1.5.1",
+  "android_version_code": 55,
+  "verified_on": "2026-10-04",
+  "automated_tests": {
+    "files_passed": 42,
+    "tests_passed": 246,
+    "tests_failed": 0
+  },
+  "typescript": "passed",
+  "lint": "passed_without_warnings",
+  "apk_signature_schemes": [
+    "v2",
+    "v3"
+  ],
+  "signer_sha256": "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+  "signer_matches_v1_5_0": true,
+  "zip_integrity": "passed",
+  "hermes_bytecode": "verified",
+  "native_libraries_16kb_aligned": 25,
+  "unchanged_assets_verified": 53,
+  "native_code": "preserved from verified v1.5.0 APK; JavaScript bundle recompiled",
+  "automatic_visual_verification": "not_run",
+  "interactive_navigation": {
+    "checks_passed": 4,
+    "checks": [
+      "isolated folder pages and distinct icons",
+      "form state retained across closing and switching",
+      "Android back handler closes and cleans up",
+      "saving redirects to My recipes even for the same folder"
+    ],
+    "renderer": "React test renderer with native adapters",
+    "physical_device": false
+  },
+  "physical_device_installation_and_end_to_end_login": "not_tested",
+  "apk_sha256": "d31a23b3dfae7575dd15211d3e4cf86553e4f0937f4289ada8bfd8424fac6b78",
+  "apk_bytes": 51921779
+}

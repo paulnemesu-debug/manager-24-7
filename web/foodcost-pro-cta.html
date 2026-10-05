@@ -1,0 +1,57 @@
+<!--
+  Bloc de inserat în pagina paradim.ro/foodcost-pro.
+  Stilurile sunt limitate la clasa .pdm-cta, ca să nu atingă restul site-ului.
+  Nu are dependențe: se poate lipi într-un bloc HTML din orice CMS.
+-->
+<div class="pdm-cta">
+  <div class="pdm-cta__copy">
+    <p class="pdm-cta__kicker">Manager 24/7</p>
+    <h3 class="pdm-cta__title">Costuri clare. Profit controlat.</h3>
+    <p class="pdm-cta__text">
+      Deschide aplicația direct în browser sau instaleaz-o pe telefonul din bucătărie.
+      Contul este același: intri cu emailul tău, fără parolă.
+    </p>
+  </div>
+  <div class="pdm-cta__actions">
+    <a class="pdm-cta__btn pdm-cta__btn--primary" href="https://foodcost.paradim.ro/">
+      Deschide în browser
+    </a>
+    <a class="pdm-cta__btn pdm-cta__btn--ghost" href="https://foodcost.paradim.ro/install.html">
+      Instalează Android
+    </a>
+    <p class="pdm-cta__note">Android 8.0+ · iPhone: adaugă pagina pe ecranul principal</p>
+  </div>
+</div>
+
+<style>
+  .pdm-cta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 28px;
+    align-items: center;
+    justify-content: space-between;
+    background: linear-gradient(140deg, #031B33, #062544);
+    color: #fff;
+    border-radius: 24px;
+    padding: 32px;
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  }
+  .pdm-cta__copy { flex: 1 1 320px; }
+  .pdm-cta__kicker {
+    color: #D5A640; font-size: 11px; font-weight: 900;
+    letter-spacing: 1.4px; text-transform: uppercase; margin: 0 0 8px;
+  }
+  .pdm-cta__title { color: #fff; font-size: 26px; line-height: 1.2; margin: 0 0 10px; }
+  .pdm-cta__text { color: #D9E2E8; font-size: 15px; line-height: 1.55; margin: 0; }
+  .pdm-cta__actions { flex: 0 1 260px; display: flex; flex-direction: column; gap: 10px; }
+  .pdm-cta__btn {
+    display: block; text-align: center; text-decoration: none;
+    font-weight: 900; font-size: 14px; padding: 15px 22px; border-radius: 16px;
+  }
+  .pdm-cta__btn--primary { background: #D5A640; color: #031B33; }
+  .pdm-cta__btn--ghost {
+    background: rgba(255, 255, 255, 0.1); color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.28);
+  }
+  .pdm-cta__note { color: #9FB2C0; font-size: 11px; text-align: center; margin: 4px 0 0; }
+</style>

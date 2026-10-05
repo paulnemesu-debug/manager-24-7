@@ -1,0 +1,11 @@
+# Configurație publică inclusă în bundle; completează cu DSN-ul proiectului Sentry.
+# Fără DSN, SDK-ul rămâne dezactivat.
+EXPO_PUBLIC_SENTRY_DSN=
+
+# Numai în mediul de build sau în secret store; nu adăuga tokenul în Git/arhivă.
+SENTRY_ORG=
+SENTRY_PROJECT=
+SENTRY_AUTH_TOKEN=
+
+# Pentru build de test fără încărcarea source maps; elimină la buildul configurat.
+SENTRY_DISABLE_AUTO_UPLOAD=true

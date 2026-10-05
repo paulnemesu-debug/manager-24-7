@@ -1,0 +1,117 @@
+{
+  "expo": {
+    "name": "Manager 24/7",
+    "slug": "paradim",
+    "owner": "paradimoperationss-team",
+    "version": "1.6.1",
+    "description": "MANAGER 24/7™ by PARADIM — software proprietar PARADIM Operations SRL, conceput și coordonat de Marius Paul Nemeșu.",
+    "backgroundColor": "#F7F5EF",
+    "orientation": "portrait",
+    "icon": "./assets/brand/manager247-app-icon.png",
+    "scheme": "manager247",
+    "userInterfaceStyle": "light",
+    "android": {
+      "package": "ro.paradim.professionalfoodcost",
+      "versionCode": 60,
+      "allowBackup": false,
+      "blockedPermissions": [
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "adaptiveIcon": {
+        "backgroundColor": "#062544",
+        "foregroundImage": "./assets/brand/manager247-adaptive-foreground.png"
+      },
+      "predictiveBackGestureEnabled": true
+    },
+    "ios": {
+      "bundleIdentifier": "ro.paradim.manager247",
+      "buildNumber": "31",
+      "supportsTablet": true,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "Manager 24/7 folosește camera numai pentru facturi, documente și fotografii de preparate.",
+        "NSPhotoLibraryUsageDescription": "Manager 24/7 accesează doar documentele și fotografiile selectate de tine."
+      }
+    },
+    "web": {
+      "output": "single",
+      "favicon": "./assets/brand/manager247-app-icon.png",
+      "name": "Manager 24/7 by PARADIM",
+      "shortName": "Manager 24/7",
+      "lang": "ro",
+      "display": "standalone",
+      "backgroundColor": "#F7F5EF",
+      "themeColor": "#062544",
+      "description": "Bucătăria ta, sub control — costuri, producție și HACCP."
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Manager 24/7 folosește fotografia aleasă pentru fișa preparatului.",
+          "cameraPermission": "Manager 24/7 folosește camera doar când alegi să fotografiezi un preparat sau să scanezi un document ori ingrediente.",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "defaultChannel": "haccp-daily",
+          "color": "#0B6A68"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 36,
+            "kotlinVersion": "2.2.0",
+            "buildArchs": [
+              "arm64-v8a"
+            ],
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true
+          }
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#062544",
+          "image": "./assets/brand/manager247-logo-transparent.png",
+          "imageWidth": 210,
+          "resizeMode": "contain"
+        }
+      ],
+      [
+        "@sentry/react-native/expo",
+        {
+          "url": "https://sentry.io/"
+        }
+      ],
+      "@react-native-community/datetimepicker",
+      "expo-image",
+      "expo-web-browser",
+      "./plugins/with-android-release"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "legal": {
+        "productName": "MANAGER 24/7™ by PARADIM",
+        "conceptAuthor": "Marius Paul Nemeșu",
+        "rightsHolder": "PARADIM Operations SRL",
+        "copyright": "© 2026 PARADIM Operations SRL. Toate drepturile rezervate.",
+        "license": "Proprietary — All Rights Reserved"
+      },
+      "eas": {
+        "projectId": "22034007-9c26-4d6f-9f33-4908b8a05acb"
+      }
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "version": "1.5.0",
+  "android_version_code": 54,
+  "verified_on": "2026-10-04",
+  "automated_tests": {
+    "files_passed": 42,
+    "tests_passed": 246,
+    "tests_failed": 0
+  },
+  "typescript": "passed",
+  "lint": "passed_without_warnings",
+  "apk_signature_schemes": [
+    "v2",
+    "v3"
+  ],
+  "signer_sha256": "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+  "signer_matches_v1_4_9": true,
+  "zip_integrity": "passed",
+  "hermes_bytecode": "verified",
+  "native_libraries_16kb_aligned": 25,
+  "unchanged_assets_verified": 53,
+  "native_code": "preserved from verified v1.4.9 APK; JavaScript bundle recompiled",
+  "automatic_visual_verification": "blocked: browser process could not create required sockets",
+  "physical_device_installation_and_end_to_end_login": "not_tested",
+  "apk_sha256": "f9a5e54229f3578894f99962d89d037885ed829a4ad753a8af79e1dc84fc01c7",
+  "apk_bytes": 51905395
+}

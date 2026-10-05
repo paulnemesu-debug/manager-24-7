@@ -1,0 +1,29 @@
+MANAGER 24/7™ by PARADIM
+
+Copyright © 2026 PARADIM Operations SRL. Toate drepturile rezervate.
+
+Autor concept și coordonator produs: Marius Paul Nemeșu
+Titular drepturi patrimoniale: PARADIM Operations SRL
+Website: https://www.paradim.ro
+Contact: contact@paradim.ro
+
+Software proprietar. Utilizarea este permisă numai conform fișierului
+LICENSE-PROPRIETARY.md și termenilor comerciali aplicabili.
+
+Produsul include componente terțe, supuse licențelor lor proprii.
+
+Sentry React Native SDK: licență MIT.
+Textul licenței SDK-ului este păstrat în licenses/sentry-react-native-MIT.txt.
+
+Date nutriționale ANSES-Ciqual:
+Anses. 2025. Table de composition nutritionnelle des aliments Ciqual.
+Publicare: 19 noiembrie 2025. https://doi.org/10.57745/RDMHWY
+Licence Ouverte / Open Licence Etalab 2.0.
+Subset de 9 componente, conversie JSON și denumiri RO/EN adăugate de PARADIM.
+Această includere nu constituie aprobarea aplicației de către ANSES.
+Detalii: NUTRITION-DATA-SOURCES.md.
+
+Produse ambalate căutate la cererea utilizatorului: Open Food Facts.
+Baza Open Food Facts: ODbL; conținut individual: DbCL.
+Aplicația nu include o copie a bazei Open Food Facts.
+https://world.openfoodfacts.org/terms-of-use

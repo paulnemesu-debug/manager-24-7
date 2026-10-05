@@ -1,0 +1,6 @@
+# Configurare publică a aplicației. Copiază acest fișier în .env.production.local.
+# Nu conține chei server, chei de furnizor AI sau parole.
+EXPO_PUBLIC_SUPABASE_URL=https://mnaaibsmijziutxuluvv.supabase.co
+EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_FUZ97amKl15vIFXyjyfeaQ_kXLiknqY
+EXPO_PUBLIC_DEMO_MODE=false
+EXPO_PUBLIC_DISTRIBUTION_CHANNEL=direct

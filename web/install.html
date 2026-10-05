@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Instalează Manager 24/7 pe Android</title>
+<meta name="description" content="Aplicația PARADIM pentru calculul food cost. Instalare directă pe Android sau folosire în browser." />
+<meta name="theme-color" content="#062544" />
+<meta property="og:title" content="Manager 24/7 by PARADIM" />
+<meta property="og:description" content="Costuri clare. Profit controlat." />
+<style>
+  :root { color-scheme: light; --navy:#062544; --navy-deep:#031B33; --gold:#D5A640; --gold-soft:#F3E4BD;
+          --cream:#F7F5EF; --ink:#17212B; --muted:#667482; --line:#DDE4E8; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--cream); color:var(--ink); padding:24px 18px 56px;
+         font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif; line-height:1.55; }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  header { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:28px; }
+  .brand { color:var(--navy); font-weight:900; font-size:15px; letter-spacing:.4px; }
+  .brand span { display:block; color:var(--muted); font-weight:600; font-size:11px; letter-spacing:0; }
+  .lang { display:flex; gap:4px; background:#EDF1F4; border-radius:999px; padding:3px; }
+  .lang button { border:0; background:transparent; padding:7px 13px; border-radius:999px; font-weight:800;
+                 font-size:12px; color:var(--muted); cursor:pointer; }
+  .lang button[aria-pressed="true"] { background:var(--navy); color:#fff; }
+  .hero { background:linear-gradient(140deg,var(--navy-deep),var(--navy)); color:#fff; border-radius:24px; padding:30px 26px; }
+  .kicker { color:var(--gold); font-size:11px; font-weight:900; letter-spacing:1.4px; text-transform:uppercase; }
+  h1 { font-size:28px; line-height:1.2; margin:10px 0 8px; }
+  .hero p { color:#D9E2E8; margin:0; font-size:15px; }
+  .cta { display:flex; flex-wrap:wrap; gap:12px; margin-top:22px; }
+  .btn { display:inline-flex; align-items:center; gap:8px; text-decoration:none; font-weight:900; font-size:14px;
+         padding:14px 20px; border-radius:16px; }
+  .btn-primary { background:var(--gold); color:var(--navy-deep); }
+  .btn-secondary { background:rgba(255,255,255,.12); color:#fff; border:1px solid rgba(255,255,255,.25); }
+  section { background:#fff; border:1px solid var(--line); border-radius:24px; padding:24px; margin-top:18px; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:1px; color:var(--gold); margin:0 0 14px; }
+  h3 { font-size:17px; margin:0 0 6px; color:var(--navy-deep); }
+  p { margin:0 0 10px; }
+  .muted { color:var(--muted); font-size:13px; }
+  ol { counter-reset:step; list-style:none; padding:0; margin:0; }
+  ol li { counter-increment:step; position:relative; padding-left:46px; margin-bottom:18px; }
+  ol li::before { content:counter(step); position:absolute; left:0; top:0; width:32px; height:32px; border-radius:11px;
+                  background:var(--navy); color:var(--gold); font-weight:900; font-size:13px;
+                  display:grid; place-items:center; }
+  ul.plain { list-style:none; padding:0; margin:0; }
+  ul.plain li { padding:9px 0; border-bottom:1px dotted var(--line); font-size:14px; display:flex; gap:10px; }
+  ul.plain li:last-child { border-bottom:0; }
+  ul.plain li::before { content:"—"; color:var(--gold); font-weight:900; }
+  .split { display:flex; gap:24px; flex-wrap:wrap; align-items:center; }
+  .split > div { flex:1 1 240px; }
+  .qrbox { background:#fff; border:1px solid var(--line); border-radius:18px; padding:14px; width:172px; }
+  .qrbox svg, .qrbox img { display:block; width:100%; height:auto; }
+  .note { background:var(--gold-soft); border-radius:16px; padding:16px 18px; font-size:13px; color:var(--navy-deep); }
+  footer { color:var(--muted); font-size:11px; text-align:center; margin-top:28px; }
+  [data-en] { display:none; }
+  html[lang="en"] [data-ro] { display:none; }
+  html[lang="en"] [data-en] { display:revert; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">Manager 24/7<span>by PARADIM Operations</span></div>
+    <div class="lang" role="group" aria-label="Limbă / Language">
+      <button type="button" data-lang="ro" aria-pressed="true">RO</button>
+      <button type="button" data-lang="en" aria-pressed="false">EN</button>
+    </div>
+  </header>
+
+  <div class="hero">
+    <div class="kicker" data-ro>Aplicație pentru HoReCa</div>
+    <div class="kicker" data-en>Built for HoReCa</div>
+    <h1 data-ro>Costuri clare. Profit controlat.</h1>
+    <h1 data-en>Clear costs. Controlled profit.</h1>
+    <p data-ro>Calculează costul real al fiecărui preparat, cu pierderi, scăzământ la gătire, TVA și preț recomandat de vânzare.</p>
+    <p data-en>Work out the real cost of every dish — trimming loss, cooking loss, VAT and the recommended sale price.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://app.paradim.ro/manager24-7.apk" download>
+        <span data-ro>Instalează pe Android</span><span data-en>Install on Android</span>
+      </a>
+      <a class="btn btn-secondary" href="https://foodcost.paradim.ro/">
+        <span data-ro>Deschide în browser</span><span data-en>Open in browser</span>
+      </a>
+    </div>
+  </div>
+
+  <section>
+    <h2 data-ro>Instalare în 3 pași</h2>
+    <h2 data-en>Install in 3 steps</h2>
+    <ol>
+      <li>
+        <h3 data-ro>Descarcă fișierul</h3>
+        <h3 data-en>Download the file</h3>
+        <p class="muted" data-ro>Apasă „Instalează pe Android". Telefonul descarcă fișierul <code>manager24-7.apk</code>.</p>
+        <p class="muted" data-en>Tap “Install on Android”. Your phone downloads <code>manager24-7.apk</code>.</p>
+      </li>
+      <li>
+        <h3 data-ro>Permite instalarea</h3>
+        <h3 data-en>Allow the installation</h3>
+        <p class="muted" data-ro>Android întreabă dacă permiți instalarea din această sursă. Alege „Setări" → activează permisiunea pentru browserul tău → revino și apasă „Instalează".</p>
+        <p class="muted" data-en>Android asks whether to allow installs from this source. Choose “Settings”, enable the permission for your browser, go back and tap “Install”.</p>
+      </li>
+      <li>
+        <h3 data-ro>Intră cu emailul tău</h3>
+        <h3 data-en>Sign in with your email</h3>
+        <p class="muted" data-ro>Deschide aplicația, scrie adresa de email și primești un cod de 6 cifre. Nu ai nevoie de parolă, iar rețetele sunt aceleași ca pe site.</p>
+        <p class="muted" data-en>Open the app, type your email and you get a 6-digit code. No password needed, and your recipes are the same as on the website.</p>
+      </li>
+    </ol>
+  </section>
+
+  <section>
+    <div class="split">
+      <div>
+        <h2 data-ro>Cerințe</h2>
+        <h2 data-en>Requirements</h2>
+        <ul class="plain">
+          <li><span data-ro>Android 8.0 sau mai nou</span><span data-en>Android 8.0 or newer</span></li>
+          <li><span data-ro>Aproximativ 60 MB spațiu liber</span><span data-en>About 60 MB of free space</span></li>
+          <li><span data-ro>Conexiune la internet pentru sincronizarea rețetelor</span><span data-en>An internet connection to sync your recipes</span></li>
+          <li><span data-ro>Instalarea din afara Google Play trebuie permisă o singură dată</span><span data-en>Installing outside Google Play needs to be allowed once</span></li>
+        </ul>
+      </div>
+      <div style="flex:0 0 auto">
+        <div class="qrbox"><img src="qr-foodcost-paradim.png" alt="QR: foodcost.paradim.ro" width="512" height="512" /></div>
+        <p class="muted" style="text-align:center;margin-top:8px">foodcost.paradim.ro</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>iPhone / iPad</h2>
+    <p data-ro>Pe iPhone deschide <a href="https://foodcost.paradim.ro/">foodcost.paradim.ro</a> în Safari, apasă butonul de partajare și alege „Adaugă pe ecranul principal". Aplicația se comportă la fel ca una instalată. Versiunea din App Store urmează.</p>
+    <p data-en>On iPhone open <a href="https://foodcost.paradim.ro/">foodcost.paradim.ro</a> in Safari, tap the share button and choose “Add to Home Screen”. It behaves like an installed app. The App Store version is coming.</p>
+  </section>
+
+  <section>
+    <div class="note">
+      <strong data-ro>Ai deja cont?</strong><strong data-en>Already have an account?</strong>
+      <span data-ro> Folosește aceeași adresă de email pe telefon și pe site. Rețetele, ingredientele și abonamentul sunt legate de email, nu de dispozitiv.</span>
+      <span data-en> Use the same email address on your phone and on the website. Recipes, ingredients and your subscription follow the email, not the device.</span>
+    </div>
+  </section>
+
+  <footer>MANAGER 24/7™ by PARADIM · Concept și coordonare: Paul Nemeșu.<br>© 2026 PARADIM Operations SRL. Toate drepturile rezervate. · <a href="https://paradim.ro">paradim.ro</a></footer>
+</div>
+
+<script>
+  document.querySelectorAll('.lang button').forEach(function (button) {
+    button.addEventListener('click', function () {
+      var lang = button.getAttribute('data-lang');
+      document.documentElement.setAttribute('lang', lang);
+      document.querySelectorAll('.lang button').forEach(function (other) {
+        other.setAttribute('aria-pressed', String(other === button));
+      });
+      try { localStorage.setItem('paradim-lang', lang); } catch (error) {}
+    });
+  });
+  try {
+    var saved = localStorage.getItem('paradim-lang');
+    if (saved === 'en') document.querySelector('.lang button[data-lang="en"]').click();
+  } catch (error) {}
+</script>
+</body>
+</html>

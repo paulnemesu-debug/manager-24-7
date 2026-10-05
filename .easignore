@@ -1,0 +1,29 @@
+# Păstrăm proiectul Android în arhiva EAS: acesta conține protecția nativă
+# împotriva ferestrei transparente pe Samsung/Android 16.
+node_modules/
+package-lock.json
+.expo/
+.cxx/
+dist/
+dist-*/
+coverage/
+.git/
+ios/
+
+# Secrete și artefacte de semnare nu intră în arhiva EAS.
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.p8
+*.p12
+*.key
+*.pem
+*.apk
+*.aab
+
+# Fișiere temporare.
+*.log
+*.tsbuildinfo
+.DS_Store

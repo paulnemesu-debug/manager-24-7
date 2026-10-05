@@ -1,0 +1,89 @@
+{
+  "cli": {
+    "version": ">= 22.6.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "environment": "development",
+      "env": {
+        "NODE_ENV": "development",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://mnaaibsmijziutxuluvv.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_FUZ97amKl15vIFXyjyfeaQ_kXLiknqY",
+        "EXPO_PUBLIC_GOOGLE_PLAY_SUBSCRIPTION_ID": "professional_foodcost_pro",
+        "EXPO_PUBLIC_DISTRIBUTION_CHANNEL": "direct",
+        "EXPO_PUBLIC_DEMO_MODE": "false"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "environment": "preview",
+      "env": {
+        "NODE_ENV": "production",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://mnaaibsmijziutxuluvv.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_FUZ97amKl15vIFXyjyfeaQ_kXLiknqY",
+        "EXPO_PUBLIC_GOOGLE_PLAY_SUBSCRIPTION_ID": "professional_foodcost_pro",
+        "EXPO_PUBLIC_DISTRIBUTION_CHANNEL": "direct",
+        "EXPO_PUBLIC_DEMO_MODE": "false"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "environment": "production",
+      "env": {
+        "NODE_ENV": "production",
+        "GRADLE_OPTS": "-Dorg.gradle.jvmargs=\"-XX:MaxMetaspaceSize=768m -Xmx3g -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8\" -Dorg.gradle.parallel=false -Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://mnaaibsmijziutxuluvv.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_FUZ97amKl15vIFXyjyfeaQ_kXLiknqY",
+        "EXPO_PUBLIC_GOOGLE_PLAY_SUBSCRIPTION_ID": "professional_foodcost_pro",
+        "EXPO_PUBLIC_DISTRIBUTION_CHANNEL": "play",
+        "EXPO_PUBLIC_DEMO_MODE": "false"
+      },
+      "android": {
+        "buildType": "app-bundle",
+        "resourceClass": "medium"
+      }
+    },
+    "production-apk": {
+      "autoIncrement": true,
+      "environment": "production",
+      "env": {
+        "NODE_ENV": "production",
+        "GRADLE_OPTS": "-Dorg.gradle.jvmargs=\"-XX:MaxMetaspaceSize=768m -Xmx3g -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8\" -Dorg.gradle.parallel=false -Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://mnaaibsmijziutxuluvv.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_FUZ97amKl15vIFXyjyfeaQ_kXLiknqY",
+        "EXPO_PUBLIC_GOOGLE_PLAY_SUBSCRIPTION_ID": "professional_foodcost_pro",
+        "EXPO_PUBLIC_DISTRIBUTION_CHANNEL": "direct",
+        "EXPO_PUBLIC_DEMO_MODE": "false"
+      },
+      "android": {
+        "buildType": "apk",
+        "resourceClass": "medium"
+      },
+      "distribution": "internal"
+    },
+    "production-ios": {
+      "autoIncrement": true,
+      "environment": "production",
+      "env": {
+        "NODE_ENV": "production",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://mnaaibsmijziutxuluvv.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_FUZ97amKl15vIFXyjyfeaQ_kXLiknqY",
+        "EXPO_PUBLIC_DISTRIBUTION_CHANNEL": "direct",
+        "EXPO_PUBLIC_DEMO_MODE": "false"
+      },
+      "ios": {
+        "resourceClass": "m-medium",
+        "simulator": false
+      }
+    }
+  }
+}
