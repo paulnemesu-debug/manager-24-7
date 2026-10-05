@@ -1,0 +1,11 @@
+# Logo revision for v1.6.1
+
+Requested change: remove the blue surrounding the screen logo so “Manager 24/7” is easier to read. Applied to the launcher icon, splash screen, in-app logo and web icons; lettering and the brand symbol retain their navy and gold colors.
+
+The artwork was edited with Codex's built-in image generation tool, using the original `manager247-logo-transparent.png` as the edit target. The final artwork is `assets/brand/manager247-logo-clear.png`. Expo's image utilities generate the platform sizes; no external image URL is needed at runtime.
+
+Edit prompt: Precisely edit the existing circular PARADIM MANAGER 24/7 logo. Remove only the thick navy outer halo/border. Outside the thin gold circle must be genuinely transparent. Keep the white interior, thin gold circle, original symbol, lettering and exact text “PARADIM”, “MANAGER”, “24/7”. Preserve navy inside the symbol and letters. Center the full circle, filling about 96% of the square, without an outside shadow or any cropped lettering.
+
+Run `node scripts/prepare-brand-assets.cjs --android` after installing the locked dependencies to regenerate the source images, web icons and native Android resources. Android adaptive artwork is padded within the central safe area; launcher and splash backgrounds are white. The app's existing cream page background is retained.
+
+The source PNGs and generated Android splash image were visually inspected. Physical-phone rendering remains to be checked on a device.

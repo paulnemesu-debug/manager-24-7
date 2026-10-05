@@ -19,7 +19,7 @@
         "android.permission.RECORD_AUDIO"
       ],
       "adaptiveIcon": {
-        "backgroundColor": "#062544",
+        "backgroundColor": "#FFFFFF",
         "foregroundImage": "./assets/brand/manager247-adaptive-foreground.png"
       },
       "predictiveBackGestureEnabled": true
@@ -81,7 +81,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#062544",
+          "backgroundColor": "#FFFFFF",
           "image": "./assets/brand/manager247-logo-transparent.png",
           "imageWidth": 210,
           "resizeMode": "contain"

@@ -2,6 +2,8 @@
 
 Android versionCode 60; iOS buildNumber 31.
 
+The app icon, splash screen and in-app logo use the revised artwork without the thick blue outer border. The Android icon and splash backgrounds are white. The adaptive foreground retains safe padding so launcher masks do not cut off the lettering. `node scripts/prepare-brand-assets.cjs --android` regenerates the platform images and Android resources from `assets/brand/manager247-logo-clear.png`.
+
 This source reconstructs the Excel fix on the verified local v1.6.0 project. The earlier v1.6.1 ZIP was unavailable locally.
 
 Native recipe, cookbook and HR Excel exports now write XLSX bytes directly through Expo FileSystem. The HR logo remains embedded as PNG bytes. The web path continues to produce browser Blobs.

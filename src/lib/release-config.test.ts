@@ -171,10 +171,10 @@ describe('Android release invariants', () => {
     const app = JSON.parse(read('app.json'));
     const nativeColors = read('android/app/src/main/res/values/colors.xml');
     expect(app.expo.icon).toBe('./assets/brand/manager247-app-icon.png');
-    expect(app.expo.android.adaptiveIcon.backgroundColor).toBe('#062544');
+    expect(app.expo.android.adaptiveIcon.backgroundColor).toBe('#FFFFFF');
     expect(app.expo.android.adaptiveIcon.foregroundImage)
       .toBe('./assets/brand/manager247-adaptive-foreground.png');
-    expect(nativeColors).toContain('<color name="iconBackground">#062544</color>');
+    expect(nativeColors).toContain('<color name="iconBackground">#FFFFFF</color>');
     expect(readFileSync(resolve(root, 'assets/brand/manager247-app-icon.png'))
       .equals(readFileSync(resolve(root, 'public/icons/manager247-app-icon.png')))).toBe(true);
     expect(readFileSync(resolve(root, 'assets/brand/manager247-logo-transparent.png'))
