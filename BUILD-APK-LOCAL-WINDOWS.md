@@ -38,6 +38,15 @@ Fișierele intermediare C++ sunt plasate în `.cxx/`, la rădăcina proiectului,
 pentru a evita limita de lungime a căilor Windows. Extrage arhiva într-un
 director cu o cale scurtă; păstrează acest cache între compilări.
 
+Ninja 1.10.2, inclus în unele instalări CMake 3.22.1, poate opri compilarea cu
+`Filename longer than 260 characters`, inclusiv pentru fișierele din cache-ul
+Gradle. Pe acest laptop utilitarul a fost actualizat la
+[Ninja 1.13.2 pentru Windows](https://github.com/ninja-build/ninja/releases/tag/v1.13.2),
+în `Android/Sdk/cmake/3.22.1/bin/ninja.exe`, cu păstrarea executabilului anterior
+ca `ninja.exe.manager247-backup-1.10.2`. Arhiva oficială a fost verificată folosind
+checksum-ul SHA-256 din metadatele release-ului GitHub. La reproducerea build-ului,
+verifică și versiunea Ninja cu `ninja.exe --version`.
+
 ## Semnare și instalare
 
 Fără `android/keystore.properties`, APK-ul este semnat cu cheia locală de test.

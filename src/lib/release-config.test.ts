@@ -175,8 +175,8 @@ describe('Android release invariants', () => {
     expect(app.expo.android.adaptiveIcon.foregroundImage)
       .toBe('./assets/brand/manager247-adaptive-foreground.png');
     expect(nativeColors).toContain('<color name="iconBackground">#FFFFFF</color>');
-    expect(readFileSync(resolve(root, 'assets/brand/manager247-app-icon.png'))
-      .equals(readFileSync(resolve(root, 'public/icons/manager247-app-icon.png')))).toBe(true);
+    expect(app.expo.web.favicon).toBe('./public/icons/manager247-app-icon.png');
+    expect(nativeColors).toContain('<color name="splashscreen_background">#062544</color>');
     expect(readFileSync(resolve(root, 'assets/brand/manager247-logo-transparent.png'))
       .equals(readFileSync(resolve(root, 'assets/brand/manager247-app-icon.png')))).toBe(false);
     expect(read('android/app/src/main/AndroidManifest.xml'))

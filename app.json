@@ -36,7 +36,7 @@
     },
     "web": {
       "output": "single",
-      "favicon": "./assets/brand/manager247-app-icon.png",
+      "favicon": "./public/icons/manager247-app-icon.png",
       "name": "Manager 24/7 by PARADIM",
       "shortName": "Manager 24/7",
       "lang": "ro",
@@ -81,7 +81,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#FFFFFF",
+          "backgroundColor": "#062544",
           "image": "./assets/brand/manager247-logo-transparent.png",
           "imageWidth": 210,
           "resizeMode": "contain"

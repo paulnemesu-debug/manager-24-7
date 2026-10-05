@@ -2,7 +2,7 @@
 
 Android versionCode 60; iOS buildNumber 31.
 
-The app icon, splash screen and in-app logo use the revised artwork without the thick blue outer border. The Android icon and splash backgrounds are white. The adaptive foreground retains safe padding so launcher masks do not cut off the lettering. `node scripts/prepare-brand-assets.cjs --android` regenerates the platform images and Android resources from `assets/brand/manager247-logo-clear.png`.
+The phone launcher icon uses revised artwork without the thick blue outer border, on a white background. The adaptive foreground retains safe padding so launcher masks do not cut off the lettering. The in-app logo, splash screen and web icons retain their previous appearance, as requested. `node scripts/prepare-brand-assets.cjs --android` regenerates the launcher images and Android icon resources from `assets/brand/manager247-logo-clear.png`.
 
 This source reconstructs the Excel fix on the verified local v1.6.0 project. The earlier v1.6.1 ZIP was unavailable locally.
 
