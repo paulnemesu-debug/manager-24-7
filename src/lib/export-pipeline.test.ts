@@ -19,7 +19,7 @@ vi.mock('expo-file-system', () => ({ Paths: { cache: 'file:///qa-cache' }, File:
 vi.mock('expo-asset', () => ({ Asset: { fromModule: () => ({ uri: 'data:image/png;base64,iVBORw0KGgo=', localUri: null, downloadAsync: async () => undefined }) } }));
 vi.mock('expo-print', () => ({
   printToFileAsync: async ({ html }: { html: string }) => { state.html.push(html); return { uri: 'file:///qa-print.pdf' }; },
-  printAsync: async ({ html }: { html: string }) => { state.html.push(html); },
+  printAsync: async () => { state.html.push('APPLICATION UI, HTML OPTION IGNORED'); },
 }));
 vi.mock('expo-sharing', () => ({ isAvailableAsync: async () => state.available, shareAsync: async (uri: string) => { state.shared.push(uri); } }));
 vi.mock('@/lib/web-download', () => ({ downloadWebFile: (data: BlobPart, name: string) => { state.downloads.push({ name, data }); } }));
@@ -37,6 +37,7 @@ import { exportHrExcel, exportHrPdf } from '@/lib/hr-export';
 import { exportHaccpDocumentPdf, exportHaccpControlPackPdf } from '@/lib/haccp-export';
 import { exportWastePlanPdf, exportRedistributionPdf, exportWasteDossierPdf } from '@/lib/waste-compliance-export';
 import { exportAccountData } from '@/lib/account-export';
+import { installPrintDocumentMock } from '@/lib/testing/web-print-dom';
 import type { HaccpDocument } from '@/types/haccp';
 import type { HrEmployee, HrShift } from '@/types/hr';
 import type { WastePreventionPlan } from '@/types/waste-compliance';
@@ -134,6 +135,33 @@ it('writes actual recipe and cookbook XLSX files that can be reopened', async ()
     evidence(index ? 'cookbook.xlsx' : 'recipe.xlsx', bytes);
   }
 });
+it.each(['en', 'ro'] as const)('localizes system piece units in %s recipe and cookbook exports without changing ingredients', async locale => {
+  const burger = demoRecipes.find(item => item.id === 'demo-burger')!;
+  const before = JSON.stringify(burger);
+  const exportContext = { ...context, locale, format: createFormatters(locale),
+    t: (key: Parameters<typeof translate>[1], params?: Parameters<typeof translate>[2]) => translate(locale, key, params),
+  };
+  const expectedUnit = locale === 'en' ? 'pcs' : 'buc';
+  await exportRecipePdf(burger, exportContext);
+  await exportCookbookPdf([burger], exportContext);
+  await exportRecipeExcel(burger, exportContext);
+  await exportCookbookExcel([burger], exportContext);
+  for (const html of state.html) {
+    expect(html).toContain('Chiflă brioche');
+    expect(html).toContain(`<td>${expectedUnit}</td>`);
+    expect(html).not.toContain(`<td>${locale === 'en' ? 'buc' : 'pcs'}</td>`);
+  }
+  const xlsxUris = state.shared.filter(uri => uri.endsWith('.xlsx'));
+  expect(xlsxUris).toHaveLength(2);
+  for (const uri of xlsxUris) {
+    const bytes = state.files.get(uri) as Uint8Array;
+    const sheets = await readXlsxFile(new BrowserBlob([new Uint8Array(bytes)]));
+    const ingredientRows = sheets.flatMap(sheet => sheet.data);
+    expect(ingredientRows.find(row => row[0] === 'Chiflă brioche')?.[2]).toBe(expectedUnit);
+    expect(ingredientRows.find(row => row[0] === 'Carne vită')?.[2]).toBe('kg');
+  }
+  expect(JSON.stringify(burger)).toBe(before);
+});
 it('carries identical automatic ingredient nutrition into final PDF content and a real XLSX file', async () => {
   const draft = { ...createEmptyRecipe(), title: 'Pui și morcov QA', servings: 2,
     ingredients: [
@@ -179,6 +207,18 @@ it('every HACCP form and the inspection pack reach the PDF and share adapters', 
   await exportHaccpControlPackPdf(HACCP_FORMS.map(form => documentFor(form.code)), 'ro', '10-2026');
   expect(state.shared).toHaveLength(HACCP_FORMS.length + 1); evidence('haccp-pack.html', state.html.at(-1)!);
 });
+it('passes English through all waste PDF exports', async () => {
+  await exportWastePlanPdf(plan, 'en');
+  await exportRedistributionPdf(2026, [], [], plan, 'en');
+  await exportWasteDossierPdf(2026, plan, [], [], [], 'en');
+  expect(state.html).toHaveLength(3);
+  for (const html of state.html) expect(html).toContain('<html lang="en">');
+  ['waste-plan', 'redistribution', 'waste-dossier'].forEach((name, index) => evidence(`${name}-en.html`, state.html[index]));
+  expect(state.shared[0]).toContain('annual-waste-plan-2026.pdf');
+  expect(state.shared[1]).toContain('annual-redistribution-report-annex-2-2026.pdf');
+  expect(state.shared[2]).toContain('waste-redistribution-dossier-2026.pdf');
+});
+
 it('exports all three waste documents with the intended file names', async () => {
   await exportWastePlanPdf(plan); await exportRedistributionPdf(2026, [], [], plan); await exportWasteDossierPdf(2026, plan, [], [], []);
   expect(state.shared).toHaveLength(3);
@@ -191,8 +231,26 @@ it('native account export writes valid JSON and identifies incomplete cloud coll
   expect(state.shared).toEqual([result.uri]); evidence('account.json', json);
 });
 it('web exports use browser printing and downloads without native file access', async () => {
-  state.os = 'web'; await exportRecipePdf(recipe, context); await exportRecipeExcel(recipe, context); await exportAccountData('qa-user', [recipe], []);
-  expect(state.html).toHaveLength(1); expect(state.downloads).toHaveLength(2); expect(state.files.size).toBe(0); expect(state.shared).toEqual([]);
+  state.os = 'web';
+  const frames = installPrintDocumentMock((html) => state.html.push(html));
+  const form = HACCP_FORMS[0];
+  const exporters: [() => Promise<unknown>, string][] = [
+    [() => exportRecipePdf(recipe, context), '&lt;script&gt;'],
+    [() => exportCookbookPdf([recipe], context), '&lt;script&gt;'],
+    [() => exportAllergenMenuPdf([recipe], context), '&lt;script&gt;'],
+    [() => exportHrPdf([employee], [shift], '2026-10', 'Locație QA'), employee.name],
+    [() => exportHaccpDocumentPdf(documentFor(form.code), form, 'ro'), form.code],
+    [() => exportHaccpControlPackPdf([documentFor(form.code)], 'ro', '10-2026'), form.code],
+    [() => exportWastePlanPdf(plan), plan.companyName],
+    [() => exportRedistributionPdf(2026, [], [], plan), plan.companyName],
+    [() => exportWasteDossierPdf(2026, plan, [], [], []), plan.companyName],
+  ];
+  for (const [run, expected] of exporters) { await run(); expect(state.html.at(-1)).toContain(expected); }
+  expect(state.html.every((html) => !html.includes('APPLICATION UI'))).toBe(true);
+  expect(frames).toHaveLength(exporters.length);
+  expect(frames.every((frame) => frame.removed)).toBe(true);
+  await exportRecipeExcel(recipe, context); await exportAccountData('qa-user', [recipe], []);
+  expect(state.html).toHaveLength(exporters.length); expect(state.downloads).toHaveLength(2); expect(state.files.size).toBe(0); expect(state.shared).toEqual([]);
 });
 it('unavailable native sharing never reports a completed export', async () => {
   state.available = false;

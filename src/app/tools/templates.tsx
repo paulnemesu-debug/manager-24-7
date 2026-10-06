@@ -17,12 +17,14 @@ import { RECIPE_TEMPLATES } from '@/constants/recipe-templates';
 import { Brand, Fonts, Radius, TabularNumbers } from '@/constants/theme';
 import { useI18n } from '@/contexts/locale-context';
 import { usePreferences } from '@/contexts/preferences-context';
+import { foodcomCopy } from '@/lib/foodcom-catalog-copy';
 
 type Filter = RecipeCategory | 'all';
 
 export default function RecipeTemplatesScreen() {
   const router = useRouter();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const catalogueText = foodcomCopy(locale);
   const { format } = usePreferences();
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
@@ -61,6 +63,15 @@ export default function RecipeTemplatesScreen() {
         <SectionHeader title={t('templates.legalTitle')} />
         <Body>{t('templates.legalBody')}</Body>
       </Card>
+
+      <Pressable accessibilityRole="button" accessibilityLabel={catalogueText.open} onPress={() => router.push('/tools/recipe-catalogue')}>
+        <Card tone="soft">
+          <SectionHeader title={catalogueText.open} />
+          <Body>{catalogueText.subtitle}</Body>
+          <Body>{catalogueText.downloadTitle}</Body>
+          <Text style={styles.metric}>{catalogueText.local}</Text>
+        </Card>
+      </Pressable>
 
       <View style={styles.search}>
         <Ionicons name="search" size={19} color={Brand.muted} />

@@ -21,7 +21,7 @@ import { AppState, Platform } from 'react-native';
 import { useI18n } from '@/contexts/locale-context';
 import { parseAuthLink } from '@/lib/auth-link';
 import { requestEmailCode, verifyEmailCode } from '@/lib/email-otp';
-import { resetInstantDemo } from '@/lib/instant-demo';
+import { resetInstantDemo, seedInstantDemo } from '@/lib/instant-demo';
 import { setInstantDemoIsolation } from '@/lib/demo-isolation';
 import { isDemoMode, isSupabaseConfigured, isWeb, supabase } from '@/lib/supabase';
 
@@ -171,10 +171,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   const startDemo = useCallback(async () => {
     await resetInstantDemo();
+    await seedInstantDemo(locale);
     setInstantDemoIsolation(true);
     setPublicDemo(true);
     setIsLoading(false);
-  }, []);
+  }, [locale]);
 
   const signOut = useCallback(async () => {
     if (publicDemo) { setInstantDemoIsolation(false); setPublicDemo(false); return; }

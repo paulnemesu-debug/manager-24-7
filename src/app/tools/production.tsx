@@ -21,6 +21,7 @@ import { useI18n } from '@/contexts/locale-context';
 import { usePreferences } from '@/contexts/preferences-context';
 import { useWorkspace } from '@/contexts/workspace-context';
 import { buildShoppingList, buildShoppingListMessage } from '@/lib/operations';
+import { displayUnit } from '@/lib/display-unit';
 import { createProductionDocumentId, saveConsumptionVoucher } from '@/lib/production-documents-repository';
 import { addProductionRecipe, buildProductionRequests, parseProductionPortions, removeProductionRecipe, searchProductionRecipes, type ProductionPlan } from '@/lib/production-plan';
 import { shareByEmail, shareOnWhatsApp } from '@/lib/share-links';
@@ -64,6 +65,7 @@ export function ProductionWorkspace({ embedded = false }: { embedded?: boolean }
       lines,
       totalLabel: t('production.total'),
       totalValue: format.money(total),
+      locale,
     });
     setSharing(true);
     try {
@@ -179,7 +181,7 @@ export function ProductionWorkspace({ embedded = false }: { embedded?: boolean }
               <Text style={styles.meta}>{line.supplier ?? t('production.noSupplier')}</Text>
             </View>
             <View style={styles.right}>
-              <Text style={styles.quantity}>{format.number(line.quantity)} {line.unit}</Text>
+              <Text style={styles.quantity}>{format.number(line.quantity)} {displayUnit(line.unit, locale)}</Text>
               <Text style={styles.cost}>{format.money(line.cost)}</Text>
             </View>
           </View>

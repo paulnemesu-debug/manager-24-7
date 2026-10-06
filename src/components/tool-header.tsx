@@ -29,7 +29,7 @@ export function ToolHeader({
     <View style={styles.header}>
       <BrandHeader mini />
       <View style={styles.row}>
-        {showBack && <IconButton icon="arrow-back" label={t('common.back')} onPress={onBack ?? (() => router.back())} />}
+        {showBack && <IconButton icon="arrow-back" label={t('common.back')} onPress={onBack ?? (() => router.canGoBack() ? router.back() : router.replace('/'))} />}
         <View style={styles.copy}>
           <Text style={styles.title}>{title}</Text>
           {!!subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}

@@ -1,10 +1,10 @@
+const { resolveSourceName, sourceFile, evaluateSource } = require('./source-loader.cjs');
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert/strict');
 const project = path.resolve(__dirname, '../..');
 const output = process.env.MANAGER_QA_OUTPUT || path.join(project, 'qa-results');
 fs.mkdirSync(output, {recursive:true});
-const ts = require(project + '/node_modules/typescript');
 const React = require('react');
 const { act, create } = require('react-test-renderer');
 global.IS_REACT_ACT_ENVIRONMENT = true;
@@ -26,7 +26,8 @@ const native = { View: 'View', Text: 'Text', Pressable: 'Pressable', Switch: 'Sw
 const widgets = new Proxy({}, { get: (_, name) => (props) => e(String(name), props, props.children) });
 const ui = { ...Object.fromEntries(['AppButton', 'Body', 'Card', 'Field', 'IconButton', 'SectionHeader', 'StatusPill', 'Title', 'BrandHeader', 'EmptyStateGraphic', 'ListSkeleton'].map((name) => [name, (props) => e(name, props, props.children)])),
   Screen: (props) => e('Screen', props, props.children, props.footer) };
-function load(name) {
+function load(name, importer) {
+  name = resolveSourceName(name, importer, project);
   if (name === 'react') return React;
   if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
   if (name === 'react-native') return native;
@@ -55,21 +56,11 @@ function load(name) {
   if (name === '@/lib/recipe-export') return {};
   if (name === '@/lib/recipe-photo') return { prepareRecipePhoto: async picked => picked.canceled ? null : 'file:///documents/qa-photo.jpg' };
   if (name.startsWith('@/') && name.endsWith('.json')) return JSON.parse(fs.readFileSync(path.join(project, 'src', name.slice(2)), 'utf8'));
-  if (name.startsWith('@/')) {
-    const stem = path.join(project, 'src', name.slice(2)); const file = ['.ts', '.tsx'].map(ext => stem + ext).find(fs.existsSync); if (!file) throw Error('Missing source ' + name);
-    if (cache.has(file)) return cache.get(file).exports;
-    const module = { exports: {} }; cache.set(file, module);
-    const code = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
-    new Function('require', 'module', 'exports', code)(load, module, module.exports);
-    return module.exports;
-  }
+  if (name.startsWith('@/')) return evaluateSource(sourceFile(path.join(project, 'src', name.slice(2))), load, cache);
   throw Error('Unexpected QA import ' + name);
 }
 function component(file) {
-  const module = { exports: {} };
-  const code = ts.transpileModule(fs.readFileSync(project + '/src/' + file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
-  new Function('require', 'module', 'exports', code)(load, module, module.exports);
-  return module.exports;
+  return evaluateSource(path.join(project, 'src', file), load, cache);
 }
 const { RecipeEditor } = component('components/recipe-editor.tsx');
 const { NutritionFields } = component('components/nutrition-fields.tsx');

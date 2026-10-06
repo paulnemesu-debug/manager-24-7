@@ -14,7 +14,7 @@ import { Alert, AppState, StyleSheet, Text, View, useWindowDimensions } from 're
 import { OtpInput } from '@/components/otp-input';
 import { AppButton, BrandHeader, Field, LoadingState, Screen } from '@/components/ui';
 import { Brand, Fonts, Radius, Shadow } from '@/constants/theme';
-import { COPYRIGHT_NOTICE } from '@/constants/legal';
+import { COPYRIGHT_NOTICE, COPYRIGHT_NOTICE_EN } from '@/constants/legal';
 import { useAuth } from '@/contexts/auth-context';
 import { useI18n } from '@/contexts/locale-context';
 import type { TranslationKey } from '@/i18n/translations';
@@ -27,7 +27,7 @@ function currentTimestamp(): number {
 export default function SignInScreen() {
   const router = useRouter();
   const auth = useAuth();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { width, height } = useWindowDimensions();
   const compact = width < 480 || height < 760;
   const veryShort = height < 680;
@@ -161,7 +161,7 @@ export default function SignInScreen() {
               />
               <Text style={styles.note}>{t('signIn.noPassword')}</Text>
               <AppButton
-                label="Vezi demo instant"
+              label={t('operational.shared.instantDemo')}
                 icon="play-circle-outline"
                 variant="secondary"
                 fullWidth
@@ -170,7 +170,7 @@ export default function SignInScreen() {
                   if (busy.current) return;
                   busy.current = true;
                   setLoading(true);
-                  void auth.startDemo().then(() => router.replace('/')).catch(() => Alert.alert('Demo indisponibil', 'Nu am putut pregăti spațiul demo. Încearcă din nou.')).finally(() => { busy.current = false; setLoading(false); });
+                  void auth.startDemo().then(() => router.replace('/')).catch(() => Alert.alert(t('operational.shared.demoError'), t('operational.shared.demoBody'))).finally(() => { busy.current = false; setLoading(false); });
                 }}
               />
               <AppButton
@@ -233,7 +233,7 @@ export default function SignInScreen() {
           <Text style={styles.legal}>{t('signIn.legal')}</Text>
         </View>
         <Text style={styles.version}>Manager 24/7 · v{appVersion}</Text>
-        <Text style={styles.copyright}>{COPYRIGHT_NOTICE}</Text>
+        <Text style={styles.copyright}>{locale === 'en' ? COPYRIGHT_NOTICE_EN : COPYRIGHT_NOTICE}</Text>
       </View>
     </Screen>
   );

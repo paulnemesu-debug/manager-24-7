@@ -6,6 +6,7 @@
  */
 
 import { type Allergen, mergeAllergens } from '@/constants/allergens';
+import { requiresSourceReview } from '@/lib/recipe-source-review';
 import type {
   FoodCostStatus,
   IngredientDraft,
@@ -87,10 +88,10 @@ export function calculateRecipeTotals(recipe: RecipeDraft): RecipeTotals {
   const vatMultiplier = 1 + Math.max(0, recipe.vatPercent || 0) / 100;
   const salePriceGross = Math.max(0, recipe.salePriceGross || 0);
   const salePriceNet = roundMoney(salePriceGross / vatMultiplier);
-  const foodCostPercent = salePriceNet > 0
+  const foodCostPercent = !requiresSourceReview(recipe) && salePriceNet > 0
     ? Math.round((portionCost / salePriceNet) * 1000) / 10
     : null;
-  const contributionMargin = salePriceNet > 0
+  const contributionMargin = !requiresSourceReview(recipe) && salePriceNet > 0
     ? roundMoney(salePriceNet - portionCost)
     : null;
   const contributionMarginPercent = salePriceNet > 0 && contributionMargin !== null

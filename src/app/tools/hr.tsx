@@ -1,3 +1,6 @@
+import { useI18n } from '@/contexts/locale-context';
+import { workforceTranslator } from '@/i18n/workforce-translations';
+import { INTL_LOCALE, type Locale } from '@/i18n/translations';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -16,9 +19,7 @@ import {
   buildHrMonthlyRows,
   changeHrPeriod,
   HR_STATUS_CODES,
-  HR_STATUS_LABELS,
   hrDateForDay,
-  hrDayCellValue,
   hrDayIsWeekend,
   hrPeriodLabel,
   hrPeriodParts,
@@ -47,8 +48,14 @@ function parseMoney(value: string) {
   return Number.isFinite(parsed) ? Math.max(0, parsed) : null;
 }
 
-function displayMoney(value: number | null) {
-  return value === null ? null : `${value.toFixed(2)} lei`;
+function displayNumber(value: number, locale: Locale, digits: number) {
+  return new Intl.NumberFormat(INTL_LOCALE[locale], {
+    useGrouping: false, minimumFractionDigits: digits, maximumFractionDigits: digits,
+  }).format(value);
+}
+
+function displayMoney(value: number | null, locale: Locale) {
+  return value === null ? null : `${displayNumber(value, locale, 2)} ${locale === 'ro' ? 'lei' : 'RON'}`;
 }
 
 function validTime(value: string) {
@@ -57,6 +64,9 @@ function validTime(value: string) {
 
 export default function HrScreen() {
   const router = useRouter();
+  const { locale } = useI18n();
+  const tr = workforceTranslator(locale);
+  const statusLabels = Object.fromEntries(statusOptions.map(item => [item.value, tr(item.label)])) as Record<HrAttendanceStatus, string>;
   const params = useLocalSearchParams<{ mode?: string }>();
   const auth = useAuth();
   const userId = auth.user?.id ?? 'demo';
@@ -135,7 +145,7 @@ export default function HrScreen() {
   )), [data.shifts, reportIds, reportMonth]);
   const reportRows = useMemo(() => buildHrMonthlyRows(reportEmployees, reportShifts, reportMonth), [reportEmployees, reportShifts, reportMonth]);
   const reportHours = useMemo(() => reportRows.reduce((sum, item) => sum + item.totalHours, 0), [reportRows]);
-  const selectedReportLocation = locations.find((item) => item.id === reportLocation)?.name ?? 'Toate locațiile';
+  const selectedReportLocation = locations.find((item) => item.id === reportLocation)?.name ?? tr("Toate locațiile");
 
   const resetEmployeeForm = () => {
     setEditingEmployeeId(null);
@@ -153,12 +163,12 @@ export default function HrScreen() {
     setName(employee.name);
     setRole(employee.role);
     setLocationId(employee.locationId);
-    setGrossSalary(employee.grossSalary === null ? '' : String(employee.grossSalary).replace('.', ','));
-    setNetSalary(employee.netSalary === null ? '' : String(employee.netSalary).replace('.', ','));
+    setGrossSalary(employee.grossSalary === null ? '' : String(employee.grossSalary).replace('.', locale === 'ro' ? ',' : '.'));
+    setNetSalary(employee.netSalary === null ? '' : String(employee.netSalary).replace('.', locale === 'ro' ? ',' : '.'));
   };
 
   const saveEmployee = async () => {
-    if (!name.trim()) return Alert.alert('Nume obligatoriu', 'Completează numele angajatului.');
+    if (!name.trim()) return Alert.alert(tr("Nume obligatoriu"), tr("Completează numele angajatului."));
     setBusy(true);
     try {
       const location = locations.find((item) => item.id === locationId);
@@ -176,7 +186,7 @@ export default function HrScreen() {
       setEmployeeId(saved.id);
       await refresh();
     } catch (error) {
-      Alert.alert('Angajatul nu a fost salvat', error instanceof Error ? error.message : 'Încearcă din nou.');
+      Alert.alert(tr("Angajatul nu a fost salvat"), error instanceof Error ? error.message : tr("Încearcă din nou."));
     } finally {
       setBusy(false);
     }
@@ -220,16 +230,16 @@ export default function HrScreen() {
   };
 
   const saveShift = async () => {
-    if (!employeeId) return Alert.alert('Alege angajatul', 'Deschide fișa angajatului înainte de a adăuga o zi.');
+    if (!employeeId) return Alert.alert(tr("Alege angajatul"), tr("Deschide fișa angajatului înainte de a adăuga o zi."));
     if (!validTime(plannedStart) || !validTime(plannedEnd) || (
       status === 'present' && (!validTime(actualStart || plannedStart) || !validTime(actualEnd || plannedEnd))
-    )) return Alert.alert('Oră incorectă', 'Selectează o oră validă.');
+    )) return Alert.alert(tr("Oră incorectă"), tr("Selectează o oră validă."));
 
     const sameDay = data.shifts.find((item) => (
       item.employeeId === employeeId && item.workDate === workDate && item.id !== editingShiftId
     ));
     if (editingShiftId && sameDay) {
-      return Alert.alert('Există deja un pontaj', 'Ziua este deja în fișa angajatului. Deschide și actualizează înregistrarea existentă.');
+      return Alert.alert(tr("Există deja un pontaj"), tr("Ziua este deja în fișa angajatului. Deschide și actualizează înregistrarea existentă."));
     }
 
     setBusy(true);
@@ -247,38 +257,38 @@ export default function HrScreen() {
       });
       await refresh();
       setEditingShiftId(null);
-      if (sameDay) Alert.alert('Zi actualizată', 'Înregistrarea existentă a fost actualizată în aceeași fișă, fără duplicat.');
+      if (sameDay) Alert.alert(tr("Zi actualizată"), tr("Înregistrarea existentă a fost actualizată în aceeași fișă, fără duplicat."));
     } catch (error) {
-      Alert.alert('Pontajul nu a fost salvat', error instanceof Error ? error.message : 'Încearcă din nou.');
+      Alert.alert(tr("Pontajul nu a fost salvat"), error instanceof Error ? error.message : tr("Încearcă din nou."));
     } finally {
       setBusy(false);
     }
   };
 
   const deleteEmployee = (id: string) => {
-    Alert.alert('Ștergi angajatul?', 'Se vor șterge și înregistrările sale de pontaj.', [
-      { text: 'Renunță', style: 'cancel' },
+    Alert.alert(tr("Ștergi angajatul?"), tr("Se vor șterge și înregistrările sale de pontaj."), [
+      { text: tr("Renunță"), style: 'cancel' },
       {
-        text: 'Șterge', style: 'destructive', onPress: () => void removeHrEmployee(userId, id)
+        text: tr("Șterge"), style: 'destructive', onPress: () => void removeHrEmployee(userId, id)
           .then((next) => {
             setData(next);
             if (employeeId === id) setEmployeeId(next.employees.find((item) => item.active)?.id ?? null);
           })
-          .catch(() => Alert.alert('Ștergere nereușită', 'Verifică conexiunea și încearcă din nou.')),
+          .catch(() => Alert.alert(tr("Ștergere nereușită"), tr("Verifică conexiunea și încearcă din nou."))),
       },
     ]);
   };
 
   const deleteShift = (shift: HrShift) => {
-    Alert.alert('Ștergi ziua din fișă?', `Înregistrarea din ${shift.workDate} va fi eliminată.`, [
-      { text: 'Renunță', style: 'cancel' },
+    Alert.alert(tr("Ștergi ziua din fișă?"), `${tr("Înregistrarea din")} ${shift.workDate} ${tr("va fi eliminată.")}`, [
+      { text: tr("Renunță"), style: 'cancel' },
       {
-        text: 'Șterge', style: 'destructive', onPress: () => void removeHrShift(userId, shift.id)
+        text: tr("Șterge"), style: 'destructive', onPress: () => void removeHrShift(userId, shift.id)
           .then((next) => {
             setData(next);
             if (editingShiftId === shift.id) clearShiftFields(shift.employeeId, shift.workDate);
           })
-          .catch(() => Alert.alert('Ștergere nereușită', 'Verifică conexiunea și încearcă din nou.')),
+          .catch(() => Alert.alert(tr("Ștergere nereușită"), tr("Verifică conexiunea și încearcă din nou."))),
       },
     ]);
   };
@@ -286,10 +296,10 @@ export default function HrScreen() {
   const exportReport = async (format: 'excel' | 'pdf') => {
     setExporting(format);
     try {
-      if (format === 'excel') await exportHrExcel(reportEmployees, reportShifts, reportMonth, selectedReportLocation);
-      else await exportHrPdf(reportEmployees, reportShifts, reportMonth, selectedReportLocation);
+      if (format === 'excel') await exportHrExcel(reportEmployees, reportShifts, reportMonth, selectedReportLocation, locale);
+      else await exportHrPdf(reportEmployees, reportShifts, reportMonth, selectedReportLocation, locale);
     } catch (error) {
-      Alert.alert('Export nereușit', error instanceof Error ? error.message : 'Fișierul nu a putut fi generat. Încearcă din nou.');
+      Alert.alert(tr("Export nereușit"), error instanceof Error ? error.message : tr("Fișierul nu a putut fi generat. Încearcă din nou."));
     } finally {
       setExporting(null);
     }
@@ -298,16 +308,16 @@ export default function HrScreen() {
   if (loading) return <Screen><ListSkeleton rows={4} /></Screen>;
 
   return <Screen>
-    <ToolHeader title="HR · Prezență angajați" subtitle="O fișă lunară pentru fiecare angajat, salarii lunare și exporturi pe locație." />
-    <AppButton label="Angajare / plecare angajat" icon="person-add-outline" variant="secondary" onPress={() => router.push('/tools/hr-lifecycle' as never)} />
+    <ToolHeader title={tr("HR · Prezență angajați")} subtitle={tr("O fișă lunară pentru fiecare angajat, salarii lunare și exporturi pe locație.")} />
+    <AppButton label={tr("Angajare / plecare angajat")} icon="person-add-outline" variant="secondary" onPress={() => router.push('/tools/hr-lifecycle' as never)} />
     {[...data.employees, ...data.shifts].some((item) => item.syncState === 'pending') && (
-      <Card tone="gold"><Body>Salvat pe dispozitiv · pontajele sau angajații așteaptă sincronizarea. Reîncercarea este automată când revii în aplicație sau cât timp acest ecran este deschis.</Body></Card>
+      <Card tone="gold"><Body>{tr("Salvat pe dispozitiv · pontajele sau angajații așteaptă sincronizarea. Reîncercarea este automată când revii în aplicație sau cât timp acest ecran este deschis.")}</Body></Card>
     )}
     <View style={styles.tabs}>
       {(['employees', 'schedule', 'reports'] as Mode[]).map((item) => (
         <Pressable key={item} onPress={() => setMode(item)} style={[styles.tab, mode === item && styles.tabActive]}>
           <Text style={[styles.tabText, mode === item && styles.tabTextActive]}>
-            {item === 'employees' ? 'Angajați' : item === 'schedule' ? 'Fișe pontaj' : 'Rapoarte'}
+            {item === 'employees' ? tr("Angajați") : item === 'schedule' ? tr("Fișe pontaj") : tr("Rapoarte")}
           </Text>
         </Pressable>
       ))}
@@ -315,24 +325,24 @@ export default function HrScreen() {
 
     {mode === 'employees' && <>
       <Card tone="navy">
-        <SectionHeader eyebrow="SALARII LUNARE ACTIVE" title={`${totalGross.toFixed(2)} lei brut`} light />
-        <Text style={styles.heroSmall}>{totalNet.toFixed(2)} lei net declarat</Text>
-        <Text style={styles.lightNote}>Totalul brut este preluat automat în raportul P&amp;L.</Text>
+        <SectionHeader eyebrow={tr("SALARII LUNARE ACTIVE")} title={`${displayNumber(totalGross, locale, 2)} ${tr("lei brut")}`} light />
+        <Text style={styles.heroSmall}>{displayNumber(totalNet, locale, 2)} {tr("lei net declarat")}</Text>
+        <Text style={styles.lightNote}>{tr("Totalul brut este preluat automat în raportul P&L.")}</Text>
       </Card>
       <Card>
-        <SectionHeader eyebrow={editingEmployeeId ? 'EDITARE FIȘĂ' : 'FIȘĂ NOUĂ'} title={editingEmployeeId ? 'Modifică angajatul' : 'Adaugă angajat'} />
-        <Field label="Nume și prenume" value={name} onChangeText={setName} />
-        <Field label="Rol / funcție" value={role} onChangeText={setRole} />
-        <Select label="Locație" placeholder="Fără locație" value={locationId} allowClear options={locations.map((item) => ({ value: item.id, label: item.name, description: item.address }))} onChange={setLocationId} />
+        <SectionHeader eyebrow={editingEmployeeId ? tr("EDITARE FIȘĂ") : tr("FIȘĂ NOUĂ")} title={editingEmployeeId ? tr("Modifică angajatul") : tr("Adaugă angajat")} />
+        <Field label={tr("Nume și prenume")} value={name} onChangeText={setName} />
+        <Field label={tr("Rol / funcție")} value={role} onChangeText={setRole} />
+        <Select label={tr("Locație")} placeholder={tr("Fără locație")} value={locationId} allowClear options={locations.map((item) => ({ value: item.id, label: item.name, description: item.address }))} onChange={setLocationId} />
         <View style={styles.row}>
-          <View style={styles.flex}><Field label="Salariu brut lunar (lei)" keyboardType="decimal-pad" value={grossSalary} onChangeText={setGrossSalary} /></View>
-          <View style={styles.flex}><Field label="Salariu net lunar (lei)" keyboardType="decimal-pad" value={netSalary} onChangeText={setNetSalary} /></View>
+          <View style={styles.flex}><Field label={tr("Salariu brut lunar (lei)")} keyboardType="decimal-pad" value={grossSalary} onChangeText={setGrossSalary} /></View>
+          <View style={styles.flex}><Field label={tr("Salariu net lunar (lei)")} keyboardType="decimal-pad" value={netSalary} onChangeText={setNetSalary} /></View>
         </View>
-        <AppButton label={editingEmployeeId ? 'Salvează modificările' : 'Salvează angajatul'} icon={editingEmployeeId ? 'save-outline' : 'person-add-outline'} fullWidth loading={busy} onPress={() => void saveEmployee()} />
-        {editingEmployeeId && <AppButton label="Renunță la editare" variant="secondary" fullWidth onPress={resetEmployeeForm} />}
+        <AppButton label={editingEmployeeId ? tr("Salvează modificările") : tr("Salvează angajatul")} icon={editingEmployeeId ? 'save-outline' : 'person-add-outline'} fullWidth loading={busy} onPress={() => void saveEmployee()} />
+        {editingEmployeeId && <AppButton label={tr("Renunță la editare")} variant="secondary" fullWidth onPress={resetEmployeeForm} />}
       </Card>
       <Card>
-        <SectionHeader eyebrow={`${data.employees.length} ANGAJAȚI`} title="Echipă" />
+        <SectionHeader eyebrow={`${data.employees.length} ${tr("ANGAJAȚI")}`} title={tr("Echipă")} />
         {data.employees.map((employee) => (
           <View key={employee.id} style={styles.listRow}>
             <View style={styles.avatar}><Ionicons name="person-outline" size={18} color={Brand.navy} /></View>
@@ -340,64 +350,68 @@ export default function HrScreen() {
               <Text style={styles.name}>{employee.name}</Text>
               <Text style={styles.meta}>{[
                 employee.role, employee.locationName,
-                employee.grossSalary === null ? null : `Brut ${displayMoney(employee.grossSalary)}`,
-                employee.netSalary === null ? null : `Net ${displayMoney(employee.netSalary)}`,
-              ].filter(Boolean).join(' · ') || 'Fără detalii'}</Text>
+                employee.grossSalary === null ? null : `${tr("Brut")} ${displayMoney(employee.grossSalary, locale)}`,
+                employee.netSalary === null ? null : `${tr("Net")} ${displayMoney(employee.netSalary, locale)}`,
+              ].filter(Boolean).join(' · ') || tr("Fără detalii")}</Text>
             </View>
             <Pressable accessibilityLabel={`Checklist ${employee.name}`} onPress={() => router.push({ pathname: '/tools/hr-lifecycle', params: { employeeId: employee.id } } as never)} style={styles.iconButton}><Ionicons name="checkbox-outline" size={19} color={Brand.navy} /></Pressable>
-            <Pressable accessibilityLabel={`Editează ${employee.name}`} onPress={() => editEmployee(employee.id)} style={styles.iconButton}><Ionicons name="create-outline" size={20} color={Brand.navy} /></Pressable>
-            <Pressable accessibilityLabel={`Șterge ${employee.name}`} onPress={() => deleteEmployee(employee.id)} style={styles.iconButton}><Ionicons name="trash-outline" size={19} color={Brand.red} /></Pressable>
+            <Pressable accessibilityLabel={`${tr("Editează")} ${employee.name}`} onPress={() => editEmployee(employee.id)} style={styles.iconButton}><Ionicons name="create-outline" size={20} color={Brand.navy} /></Pressable>
+            <Pressable accessibilityLabel={`${tr("Șterge")} ${employee.name}`} onPress={() => deleteEmployee(employee.id)} style={styles.iconButton}><Ionicons name="trash-outline" size={19} color={Brand.red} /></Pressable>
           </View>
         ))}
-        {!data.employees.length && <Body>Adaugă primul angajat pentru a crea fișa de pontaj.</Body>}
+        {!data.employees.length && <Body>{tr("Adaugă primul angajat pentru a crea fișa de pontaj.")}</Body>}
       </Card>
     </>}
 
     {mode === 'schedule' && <>
       <Card tone="navy">
-        <SectionHeader eyebrow="LUNA FIȘELOR" title={hrPeriodLabel(sheetMonth)} light />
+        <SectionHeader eyebrow={tr("LUNA FIȘELOR")} title={hrPeriodLabel(sheetMonth, locale)} light />
         <View style={styles.monthNav}>
-          <Pressable accessibilityLabel="Luna anterioară" onPress={() => setSheetMonth(changeHrPeriod(sheetMonth, -1))} style={styles.monthNavButton}><Ionicons name="chevron-back" size={22} color={Brand.white} /></Pressable>
+          <Pressable accessibilityLabel={tr("Luna anterioară")} onPress={() => setSheetMonth(changeHrPeriod(sheetMonth, -1))} style={styles.monthNavButton}><Ionicons name="chevron-back" size={22} color={Brand.white} /></Pressable>
           <Text style={styles.monthCode}>{sheetMonth}</Text>
-          <Pressable accessibilityLabel="Luna următoare" onPress={() => setSheetMonth(changeHrPeriod(sheetMonth, 1))} style={styles.monthNavButton}><Ionicons name="chevron-forward" size={22} color={Brand.white} /></Pressable>
+          <Pressable accessibilityLabel={tr("Luna următoare")} onPress={() => setSheetMonth(changeHrPeriod(sheetMonth, 1))} style={styles.monthNavButton}><Ionicons name="chevron-forward" size={22} color={Brand.white} /></Pressable>
         </View>
       </Card>
 
       <Card>
-        <SectionHeader eyebrow={`${monthRows.length} FIȘE`} title="Alege angajatul" />
-        <Body>Fiecare angajat are o singură fișă pe lună. O zi salvată din nou este actualizată, nu duplicată.</Body>
+        <SectionHeader eyebrow={`${monthRows.length} ${tr("FIȘE")}`} title={tr("Alege angajatul")} />
+        <Body>{tr("Fiecare angajat are o singură fișă pe lună. O zi salvată din nou este actualizată, nu duplicată.")}</Body>
         {monthRows.map((row) => {
           const selected = row.employee.id === employeeId;
           const completed = row.presentDays + row.absentDays + row.leaveDays + row.dayOffDays + row.scheduledDays;
           return (
             <Pressable key={row.employee.id} onPress={() => openEmployeeSheet(row.employee.id)} style={({ pressed }) => [styles.sheetRow, selected && styles.sheetRowSelected, pressed && styles.pressed]}>
               <View style={[styles.avatar, selected && styles.avatarSelected]}><Ionicons name="document-text-outline" size={18} color={selected ? Brand.white : Brand.navy} /></View>
-              <View style={styles.flex}><Text style={styles.name}>{row.employee.name}</Text><Text style={styles.meta}>{row.employee.role || 'Fără funcție'} · {completed} zile · {row.totalHours.toFixed(1)} ore</Text></View>
+              <View style={styles.flex}><Text style={styles.name}>{row.employee.name}</Text><Text style={styles.meta}>{row.employee.role || tr("Fără funcție")} · {completed} {tr("zile ·")} {displayNumber(row.totalHours, locale, 1)} {tr("ore")}</Text></View>
               <Ionicons name={selected ? 'checkmark-circle' : 'chevron-forward'} size={21} color={selected ? Brand.teal : Brand.muted} />
             </Pressable>
           );
         })}
-        {!monthRows.length && <Body>Nu există angajați activi.</Body>}
+        {!monthRows.length && <Body>{tr("Nu există angajați activi.")}</Body>}
       </Card>
 
       {selectedMonthRow && <>
         <Card>
-          <SectionHeader eyebrow="FIȘĂ LUNARĂ UNICĂ" title={selectedMonthRow.employee.name} />
+          <SectionHeader eyebrow={tr("FIȘĂ LUNARĂ UNICĂ")} title={selectedMonthRow.employee.name} />
           <View style={styles.sheetSummary}>
-            <StatusPill label={`${selectedMonthRow.totalHours.toFixed(1)} ore`} status="healthy" />
-            <StatusPill label={`${selectedMonthRow.presentDays} prezente`} status="healthy" />
-            <StatusPill label={`${selectedMonthRow.absentDays} absențe`} status={selectedMonthRow.absentDays ? 'critical' : 'neutral'} />
-            <StatusPill label={`${selectedMonthRow.leaveDays} concediu`} status="neutral" />
+            <StatusPill label={`${displayNumber(selectedMonthRow.totalHours, locale, 1)} ${tr("ore")}`} status="healthy" />
+            <StatusPill label={`${selectedMonthRow.presentDays} ${tr("prezente")}`} status="healthy" />
+            <StatusPill label={`${selectedMonthRow.absentDays} ${tr("absențe")}`} status={selectedMonthRow.absentDays ? 'critical' : 'neutral'} />
+            <StatusPill label={`${selectedMonthRow.leaveDays} ${tr("concediu")}`} status="neutral" />
           </View>
           <View style={styles.monthGrid}>
             {Array.from({ length: hrPeriodParts(sheetMonth).days }, (_, index) => {
               const day = index + 1;
               const shift = selectedMonthRow.shiftsByDay.get(day);
+              const workedHours = shift ? hrShiftWorkedHours(shift) : 0;
+              const dayValue = !shift ? '—' : shift.status === 'present'
+                ? displayNumber(workedHours, locale, Number.isInteger(workedHours) ? 0 : 1)
+                : HR_STATUS_CODES[shift.status];
               const selected = workDate === hrDateForDay(sheetMonth, day);
               return (
                 <Pressable
                   key={day}
-                  accessibilityLabel={`Ziua ${day}, ${shift ? HR_STATUS_LABELS[shift.status] : 'necompletată'}`}
+                  accessibilityLabel={`${tr("Ziua")} ${day}, ${shift ? statusLabels[shift.status] : tr("necompletată")}`}
                   onPress={() => openDay(day)}
                   style={({ pressed }) => [
                     styles.dayCell,
@@ -411,8 +425,8 @@ export default function HrScreen() {
                     pressed && styles.pressed,
                   ]}>
                   <Text style={styles.dayNumber}>{day}</Text>
-                  <Text style={styles.dayWeek}>{hrWeekdayLabel(sheetMonth, day)}</Text>
-                  <Text style={styles.dayValue}>{shift ? hrDayCellValue(shift) || HR_STATUS_CODES[shift.status] : '—'}</Text>
+                  <Text style={styles.dayWeek}>{hrWeekdayLabel(sheetMonth, day, locale)}</Text>
+                  <Text style={styles.dayValue}>{dayValue}</Text>
                 </Pressable>
               );
             })}
@@ -420,56 +434,56 @@ export default function HrScreen() {
         </Card>
 
         <Card>
-          <SectionHeader eyebrow={editingShiftId ? 'ACTUALIZARE ZI' : 'ZI NOUĂ'} title={`${selectedMonthRow.employee.name} · ${workDate}`} />
-          <HaccpDateInput label="Data" locale="ro" value={workDate} onChange={(next) => {
+          <SectionHeader eyebrow={editingShiftId ? tr("ACTUALIZARE ZI") : tr("ZI NOUĂ")} title={`${selectedMonthRow.employee.name} · ${workDate}`} />
+          <HaccpDateInput label={tr("Data")} locale={locale} value={workDate} onChange={(next) => {
             setWorkDate(next);
             const existing = data.shifts.find((item) => item.employeeId === employeeId && item.workDate === next);
             if (existing) editShift(existing);
             else clearShiftFields(employeeId, next);
           }} />
           <View style={styles.row}>
-            <View style={styles.flex}><HaccpTimeInput label="Program început" locale="ro" value={plannedStart} onChange={setPlannedStart} /></View>
-            <View style={styles.flex}><HaccpTimeInput label="Program sfârșit" locale="ro" value={plannedEnd} onChange={setPlannedEnd} /></View>
+            <View style={styles.flex}><HaccpTimeInput label={tr("Program început")} locale={locale} value={plannedStart} onChange={setPlannedStart} /></View>
+            <View style={styles.flex}><HaccpTimeInput label={tr("Program sfârșit")} locale={locale} value={plannedEnd} onChange={setPlannedEnd} /></View>
           </View>
-          <ChoiceRow label="Status" value={status} options={[...statusOptions]} onChange={setStatus} />
+          <ChoiceRow label={tr("Status")} value={status} options={statusOptions.map(item => ({ ...item, label: tr(item.label) }))} onChange={setStatus} />
           {status === 'present' && <View style={styles.row}>
-            <View style={styles.flex}><HaccpTimeInput label="Ora intrării" locale="ro" value={actualStart || plannedStart} onChange={setActualStart} /></View>
-            <View style={styles.flex}><HaccpTimeInput label="Ora ieșirii" locale="ro" value={actualEnd || plannedEnd} onChange={setActualEnd} /></View>
+            <View style={styles.flex}><HaccpTimeInput label={tr("Ora intrării")} locale={locale} value={actualStart || plannedStart} onChange={setActualStart} /></View>
+            <View style={styles.flex}><HaccpTimeInput label={tr("Ora ieșirii")} locale={locale} value={actualEnd || plannedEnd} onChange={setActualEnd} /></View>
           </View>}
-          <Field label="Observații" multiline numberOfLines={3} value={notes} onChangeText={setNotes} />
-          <AppButton label={editingShiftId ? 'Actualizează ziua' : 'Salvează ziua în fișă'} icon="save-outline" fullWidth loading={busy} onPress={() => void saveShift()} />
-          {editingShiftId && <AppButton label="Renunță la editare" variant="secondary" fullWidth onPress={() => clearShiftFields(employeeId, workDate)} />}
+          <Field label={tr("Observații")} multiline numberOfLines={3} value={notes} onChangeText={setNotes} />
+          <AppButton label={editingShiftId ? tr("Actualizează ziua") : tr("Salvează ziua în fișă")} icon="save-outline" fullWidth loading={busy} onPress={() => void saveShift()} />
+          {editingShiftId && <AppButton label={tr("Renunță la editare")} variant="secondary" fullWidth onPress={() => clearShiftFields(employeeId, workDate)} />}
         </Card>
 
         <Card>
-          <SectionHeader eyebrow={`${selectedMonthShifts.length} ZILE`} title="Înregistrările fișei" />
+          <SectionHeader eyebrow={`${selectedMonthShifts.length} ${tr("ZILE")}`} title={tr("Înregistrările fișei")} />
           {selectedMonthShifts.map((shift) => (
             <View key={shift.id} style={styles.listRow}>
               <View style={styles.flex}>
-                <Text style={styles.name}>{shift.workDate} · {HR_STATUS_LABELS[shift.status]}</Text>
-                <Text style={styles.meta}>{shift.plannedStart}–{shift.plannedEnd}{shift.actualStart ? ` · ${shift.actualStart}–${shift.actualEnd}` : ''} · {hrShiftWorkedHours(shift).toFixed(1)} ore</Text>
+                <Text style={styles.name}>{shift.workDate} · {statusLabels[shift.status]}</Text>
+                <Text style={styles.meta}>{shift.plannedStart}–{shift.plannedEnd}{shift.actualStart ? ` · ${shift.actualStart}–${shift.actualEnd}` : ''} · {displayNumber(hrShiftWorkedHours(shift), locale, 1)} {tr("ore")}</Text>
               </View>
-              <Pressable accessibilityLabel={`Editează ziua ${shift.workDate}`} onPress={() => editShift(shift)} style={styles.iconButton}><Ionicons name="create-outline" size={19} color={Brand.navy} /></Pressable>
-              <Pressable accessibilityLabel={`Șterge ziua ${shift.workDate}`} onPress={() => deleteShift(shift)} style={styles.iconButton}><Ionicons name="trash-outline" size={18} color={Brand.red} /></Pressable>
+              <Pressable accessibilityLabel={`${tr("Editează ziua")} ${shift.workDate}`} onPress={() => editShift(shift)} style={styles.iconButton}><Ionicons name="create-outline" size={19} color={Brand.navy} /></Pressable>
+              <Pressable accessibilityLabel={`${tr("Șterge ziua")} ${shift.workDate}`} onPress={() => deleteShift(shift)} style={styles.iconButton}><Ionicons name="trash-outline" size={18} color={Brand.red} /></Pressable>
             </View>
           ))}
-          {!selectedMonthShifts.length && <Body>Fișa nu are încă nicio zi completată.</Body>}
+          {!selectedMonthShifts.length && <Body>{tr("Fișa nu are încă nicio zi completată.")}</Body>}
         </Card>
       </>}
     </>}
 
     {mode === 'reports' && <>
       <Card tone="navy">
-        <SectionHeader eyebrow="RAPORT SELECTAT" title={`${reportEmployees.length} fișe · ${reportHours.toFixed(1)} ore`} light />
+        <SectionHeader eyebrow={tr("RAPORT SELECTAT")} title={`${reportEmployees.length} ${tr("fișe ·")} ${displayNumber(reportHours, locale, 1)} ${tr("ore")}`} light />
         <Text style={styles.hero}>{reportMonth}</Text>
       </Card>
       <Card>
-        <SectionHeader title="Filtre și export" />
-        <Field label="Luna (AAAA-LL)" value={reportMonth} onChangeText={setReportMonth} placeholder="2026-09" />
-        <Select label="Locație" placeholder="Toate locațiile" value={reportLocation} allowClear options={locations.map((item) => ({ value: item.id, label: item.name }))} onChange={setReportLocation} />
-        <Body>Excelul conține matricea lunară ca în modelul furnizat și câte o filă individuală pentru fiecare angajat.</Body>
-        <AppButton label="Descarcă Excel" icon="grid-outline" fullWidth loading={exporting === 'excel'} disabled={!reportEmployees.length || exporting !== null} onPress={() => void exportReport('excel')} />
-        <AppButton label="Descarcă PDF" icon="document-text-outline" variant="secondary" fullWidth loading={exporting === 'pdf'} disabled={!reportEmployees.length || exporting !== null} onPress={() => void exportReport('pdf')} />
+        <SectionHeader title={tr("Filtre și export")} />
+        <Field label={tr("Luna (AAAA-LL)")} value={reportMonth} onChangeText={setReportMonth} placeholder="2026-09" />
+        <Select label={tr("Locație")} placeholder={tr("Toate locațiile")} value={reportLocation} allowClear options={locations.map((item) => ({ value: item.id, label: item.name }))} onChange={setReportLocation} />
+        <Body>{tr("Excelul conține matricea lunară ca în modelul furnizat și câte o filă individuală pentru fiecare angajat.")}</Body>
+        <AppButton label={tr("Descarcă Excel")} icon="grid-outline" fullWidth loading={exporting === 'excel'} disabled={!reportEmployees.length || exporting !== null} onPress={() => void exportReport('excel')} />
+        <AppButton label={tr("Descarcă PDF")} icon="document-text-outline" variant="secondary" fullWidth loading={exporting === 'pdf'} disabled={!reportEmployees.length || exporting !== null} onPress={() => void exportReport('pdf')} />
       </Card>
     </>}
   </Screen>;

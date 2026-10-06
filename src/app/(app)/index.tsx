@@ -18,8 +18,9 @@ import { useI18n } from '@/contexts/locale-context';
 import { usePreferences } from '@/contexts/preferences-context';
 import { useWorkspace } from '@/contexts/workspace-context';
 import { useOperationalResource } from '@/hooks/use-operational-resource';
-import { loadDailyOperations } from '@/lib/daily-operations';
+import { dailyAttendance, loadDailyOperations } from '@/lib/daily-operations';
 import type { TranslationKey } from '@/i18n/translations';
+import { totalMonthlyGrossSalary } from '@/lib/hr';
 import { loadHrData } from '@/lib/hr-repository';
 import { localIsoDate } from '@/lib/local-date-time';
 import { calculatePnl, currentPnlPeriod } from '@/lib/pnl';
@@ -77,10 +78,12 @@ export default function DashboardScreen() {
     shift.workDate === today && activeEmployeeIds.has(shift.employeeId)
   ));
   const presentToday = todayShifts.filter((shift) => shift.status === 'present').length;
-  const recordedToday = new Set(todayShifts.map((shift) => shift.employeeId)).size;
-  const pendingToday = Math.max(0, activeEmployees.length - recordedToday);
+  const { pendingAttendance: pendingToday } = dailyAttendance(hrData, today);
   const latestAlert = alerts[0] ?? null;
-  const pnlResult = currentPnl ? calculatePnl(currentPnl) : null;
+  const pnlResult = currentPnl ? calculatePnl({
+    ...currentPnl,
+    payrollCost: totalMonthlyGrossSalary(hrData.employees),
+  }) : null;
   const pnlStatusLabel = pnlResult
     ? t(`pnl.status${pnlResult.healthStatus[0].toUpperCase()}${pnlResult.healthStatus.slice(1)}` as TranslationKey)
     : t('pnl.statusIncomplete');
@@ -105,9 +108,9 @@ export default function DashboardScreen() {
         <View style={styles.cardTopRow}>
           <View style={styles.dailyManagerIcon}><Ionicons name="sparkles" size={22} color={Brand.gold} /></View>
           <View style={styles.flex}>
-            <Text style={styles.pnlEyebrow}>MANAGER 24/7 · ASTĂZI</Text>
+            <Text style={styles.pnlEyebrow}>{t('operational.home.today')}</Text>
             <Text style={styles.dailyManagerTitle}>AI Daily Manager</Text>
-            <Text style={styles.dailyManagerMeta}>{daily.loading ? 'Se încarcă prioritățile…' : daily.error ? 'Priorități indisponibile · deschide pentru reîncercare' : daily.data ? `${daily.data.score}/100 · ${daily.data.signals.length} acțiuni azi` : 'Deschide prioritățile zilei'}</Text>
+            <Text style={styles.dailyManagerMeta}>{daily.loading ? t('operational.home.loading') : daily.error ? t('operational.home.unavailable') : daily.data ? t('operational.home.summary', { score: daily.data.score, count: daily.data.signals.length }) : t('operational.home.open')}</Text>
             {!!daily.data?.signals[0] && <Text style={styles.dailyManagerMeta}>{daily.data.signals[0].title}</Text>}
           </View>
           <Ionicons name="arrow-forward-circle" size={30} color={Brand.gold} />

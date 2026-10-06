@@ -1,7 +1,10 @@
+import type { Locale } from '@/i18n/translations';
+import { workforceTranslator } from '@/i18n/workforce-translations';
 import { File, Paths } from 'expo-file-system';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { Platform } from 'react-native';
+import { printHtmlInBrowser } from '@/lib/web-print';
 import type { Cell } from 'write-excel-file/universal';
 
 import { PARADIM_LOGO_DATA_URI } from '@/constants/brand-logo';
@@ -94,7 +97,9 @@ function matrixSheet(
   locationName: string,
   generatedAt: Date,
   logo: Uint8Array,
+  locale: Locale,
 ): ExcelSheet {
+  const tr = workforceTranslator(locale);
   const { days } = hrPeriodParts(period);
   const rows = buildHrMonthlyRows(employees, shifts, period);
   const records = buildHrRows(employees, shifts.filter((shift) => shift.workDate.startsWith(`${period}-`)));
@@ -105,17 +110,17 @@ function matrixSheet(
   const data: Cell[][] = [
     [cell('MANAGER 24/7 by PARADIM', { columnSpan: width, height: 54, align: 'center', fontWeight: 'bold', fontSize: 15, textColor: NAVY })],
     [cell(`PARADIM Operations SRL · Iași, România · ${COMPANY_CONTACT_LINE}`, { columnSpan: width, align: 'center', textColor: '#52626F', fontSize: 8 })],
-    [cell('PONTAJ LUNAR', { columnSpan: width, align: 'center', fontWeight: 'bold', fontSize: 16, textColor: '#D67B31', height: 30 })],
-    [cell(`${hrPeriodLabel(period)} · ${locationName}`, { columnSpan: width, align: 'center', fontWeight: 'bold', textColor: NAVY })],
-    [cell(`Nume raport: Pontaj lunar · Data generării: ${hrGeneratedAtLabel(generatedAt)} · Perioada: ${period}`, { columnSpan: width, align: 'center', textColor: '#52626F', fontSize: 8 })],
-    [cell(`Angajați: ${rows.length} · Înregistrări: ${records.length} · Ore lucrate: ${totalHours.toFixed(1)} · Salarii brute: ${totalGross.toFixed(2)} lei · Salarii nete: ${totalNet.toFixed(2)} lei`, { columnSpan: width, align: 'center', backgroundColor: SOFT, fontWeight: 'bold', textColor: NAVY, height: 24 })],
+    [cell(tr("PONTAJ LUNAR"), { columnSpan: width, align: 'center', fontWeight: 'bold', fontSize: 16, textColor: '#D67B31', height: 30 })],
+    [cell(`${hrPeriodLabel(period, locale)} · ${locationName}`, { columnSpan: width, align: 'center', fontWeight: 'bold', textColor: NAVY })],
+    [cell(`${tr("Nume raport:")} ${tr("Pontaj lunar")} · ${tr("Data generării:")} ${hrGeneratedAtLabel(generatedAt, locale)} · ${locale === 'ro' ? 'Perioada' : 'Period'}: ${period}`, { columnSpan: width, align: 'center', textColor: '#52626F', fontSize: 8 })],
+    [cell(`${tr("Angajați")}: ${rows.length} · ${tr("Înregistrări")}: ${records.length} · ${tr("Ore lucrate")}: ${totalHours.toFixed(1)} · ${tr("Salarii brute")}: ${totalGross.toFixed(2)} RON · ${tr("Salarii nete")}: ${totalNet.toFixed(2)} RON`, { columnSpan: width, align: 'center', backgroundColor: SOFT, fontWeight: 'bold', textColor: NAVY, height: 24 })],
     [
-      heading('Angajat'), heading('Funcție'),
+      heading(tr("Angajat")), heading(tr("Funcție")),
       ...Array.from({ length: days }, (_, index) => {
         const day = index + 1;
-        return heading(`${day}\n${hrWeekdayLabel(period, day)}`, hrDayIsWeekend(period, day) ? { backgroundColor: '#8E3E46' } : {});
+        return heading(`${day}\n${hrWeekdayLabel(period, day, locale)}`, hrDayIsWeekend(period, day) ? { backgroundColor: '#8E3E46' } : {});
       }),
-      heading('Ore'), heading('P'), heading('A'), heading('CO'), heading('L'),
+      heading(tr("Ore")), heading('P'), heading('A'), heading('CO'), heading('L'),
     ],
   ];
   for (const row of rows) {
@@ -130,7 +135,7 @@ function matrixSheet(
       cell(row.dayOffDays, { align: 'center', fontWeight: 'bold', backgroundColor: SOFT, borderColor: LINE, borderStyle: 'thin' }),
     ]);
   }
-  data.push([cell('Legendă: număr = ore lucrate · PR = programat · A = absent · CO = concediu · L = liber.', { columnSpan: width, fontStyle: 'italic', textColor: '#52626F', fontSize: 8, height: 22 })]);
+  data.push([cell(tr("Legendă: număr = ore lucrate · PR = programat · A = absent · CO = concediu · L = liber."), { columnSpan: width, fontStyle: 'italic', textColor: '#52626F', fontSize: 8, height: 22 })]);
   return {
     rows: data,
     columns: [{ width: 25 }, { width: 18 }, ...Array.from({ length: days }, () => ({ width: 5 })), ...Array.from({ length: 5 }, () => ({ width: 8 }))],
@@ -139,30 +144,31 @@ function matrixSheet(
   };
 }
 
-function employeeSheet(row: HrMonthlyRow, period: string, generatedAt: Date, logo: Uint8Array): ExcelSheet {
+function employeeSheet(row: HrMonthlyRow, period: string, generatedAt: Date, logo: Uint8Array, locale: Locale): ExcelSheet {
+  const tr = workforceTranslator(locale);
   const { days } = hrPeriodParts(period);
   const data: Cell[][] = [
     [cell('MANAGER 24/7 by PARADIM', { columnSpan: 8, height: 54, align: 'center', fontWeight: 'bold', fontSize: 14, textColor: NAVY })],
     [cell(`PARADIM Operations SRL · ${COMPANY_CONTACT_LINE}`, { columnSpan: 8, align: 'center', textColor: '#52626F', fontSize: 8 })],
-    [cell('FIȘĂ LUNARĂ DE PONTAJ', { columnSpan: 8, align: 'center', fontWeight: 'bold', fontSize: 15, textColor: '#D67B31', height: 30 })],
-    [cell(`${row.employee.name} · ${row.employee.role || 'Fără funcție'} · ${row.employee.locationName || 'Fără locație'}`, { columnSpan: 8, align: 'center', fontWeight: 'bold', textColor: NAVY })],
-    [cell(`${hrPeriodLabel(period)} · generat ${hrGeneratedAtLabel(generatedAt)}`, { columnSpan: 8, align: 'center', textColor: '#52626F', fontSize: 8 })],
-    ['Data', 'Zi', 'Program', 'Intrare', 'Ieșire', 'Status', 'Ore', 'Observații'].map((value) => heading(value)),
+    [cell(tr("FIȘĂ LUNARĂ DE PONTAJ"), { columnSpan: 8, align: 'center', fontWeight: 'bold', fontSize: 15, textColor: '#D67B31', height: 30 })],
+    [cell(`${row.employee.name} · ${row.employee.role || tr("Fără funcție")} · ${row.employee.locationName || tr("Fără locație")}`, { columnSpan: 8, align: 'center', fontWeight: 'bold', textColor: NAVY })],
+    [cell(`${hrPeriodLabel(period, locale)} · ${locale === 'ro' ? 'generat' : 'generated'} ${hrGeneratedAtLabel(generatedAt, locale)}`, { columnSpan: 8, align: 'center', textColor: '#52626F', fontSize: 8 })],
+    [tr("Data"), tr("Zi"), tr("Program"), tr("Intrare"), tr("Ieșire"), tr("Status"), tr("Ore"), tr("Observații")].map((value) => heading(value)),
   ];
   for (let day = 1; day <= days; day += 1) {
     const shift = row.shiftsByDay.get(day);
     data.push([
       cell(`${period}-${String(day).padStart(2, '0')}`, { borderColor: LINE, borderStyle: 'thin' }),
-      cell(hrWeekdayLabel(period, day), { align: 'center', backgroundColor: hrDayIsWeekend(period, day) ? '#F5E5E7' : undefined, borderColor: LINE, borderStyle: 'thin' }),
+      cell(hrWeekdayLabel(period, day, locale), { align: 'center', backgroundColor: hrDayIsWeekend(period, day) ? '#F5E5E7' : undefined, borderColor: LINE, borderStyle: 'thin' }),
       cell(shift ? `${shift.plannedStart}–${shift.plannedEnd}` : '', { align: 'center', borderColor: LINE, borderStyle: 'thin' }),
       cell(shift?.actualStart ?? '', { align: 'center', borderColor: LINE, borderStyle: 'thin' }),
       cell(shift?.actualEnd ?? '', { align: 'center', borderColor: LINE, borderStyle: 'thin' }),
-      cell(shift ? HR_STATUS_LABELS[shift.status] : '', { align: 'center', borderColor: LINE, borderStyle: 'thin' }),
+      cell(shift ? tr(HR_STATUS_LABELS[shift.status]) : '', { align: 'center', borderColor: LINE, borderStyle: 'thin' }),
       cell(shift ? row.shiftsByDay.get(day)?.status === 'present' ? Number(hrDayCellValue(shift).replace(',', '.')) : 0 : 0, { align: 'right', format: '0.0', borderColor: LINE, borderStyle: 'thin' }),
       cell(shift?.notes ?? '', { wrap: true, borderColor: LINE, borderStyle: 'thin' }),
     ]);
   }
-  data.push([cell('TOTAL LUNĂ', { columnSpan: 6, align: 'right', fontWeight: 'bold', backgroundColor: SOFT, borderColor: LINE, borderStyle: 'thin' }), null, null, null, null, null, cell(row.totalHours, { align: 'right', fontWeight: 'bold', backgroundColor: SOFT, borderColor: LINE, borderStyle: 'thin', format: '0.0' }), cell(`P ${row.presentDays} · A ${row.absentDays} · CO ${row.leaveDays} · L ${row.dayOffDays}`, { fontWeight: 'bold', backgroundColor: SOFT, borderColor: LINE, borderStyle: 'thin' })]);
+  data.push([cell(tr("TOTAL LUNĂ"), { columnSpan: 6, align: 'right', fontWeight: 'bold', backgroundColor: SOFT, borderColor: LINE, borderStyle: 'thin' }), null, null, null, null, null, cell(row.totalHours, { align: 'right', fontWeight: 'bold', backgroundColor: SOFT, borderColor: LINE, borderStyle: 'thin', format: '0.0' }), cell(`P ${row.presentDays} · A ${row.absentDays} · CO ${row.leaveDays} · L ${row.dayOffDays}`, { fontWeight: 'bold', backgroundColor: SOFT, borderColor: LINE, borderStyle: 'thin' })]);
   return {
     rows: data,
     columns: [{ width: 14 }, { width: 7 }, { width: 15 }, { width: 11 }, { width: 11 }, { width: 13 }, { width: 10 }, { width: 34 }],
@@ -175,13 +181,16 @@ export async function exportHrExcel(
   shifts: readonly HrShift[],
   period: string,
   locationName = 'Toate locațiile',
+  locale: Locale = 'ro',
 ) {
+  const tr = workforceTranslator(locale);
+  const selectedLocation = locationName === 'Toate locațiile' ? tr('Toate locațiile') : locationName;
   const generatedAt = new Date();
   const logo = logoBytes();
   const monthlyRows = buildHrMonthlyRows(employees, shifts, period);
   const sheets = [
-    { name: 'Pontaj lunar', ...matrixSheet(employees, shifts, period, locationName, generatedAt, logo) },
-    ...monthlyRows.map((row, index) => ({ name: `Fisa ${String(index + 1).padStart(2, '0')}`, ...employeeSheet(row, period, generatedAt, logo) })),
+    { name: tr("Pontaj lunar"), ...matrixSheet(employees, shifts, period, selectedLocation, generatedAt, logo, locale) },
+    ...monthlyRows.map((row, index) => ({ name: `${locale === 'ro' ? 'Fisa' : 'Sheet'} ${String(index + 1).padStart(2, '0')}`, ...employeeSheet(row, period, generatedAt, logo, locale) })),
   ];
   const workbook = createExcelWorkbook(sheets);
   const fileName = hrReportFileName(period, 'xlsx', generatedAt);
@@ -192,8 +201,8 @@ export async function exportHrExcel(
   if (file.exists) file.delete();
   file.create();
   file.write(bytes);
-  if (!(await Sharing.isAvailableAsync())) throw new Error('Partajarea fișierelor nu este disponibilă pe acest dispozitiv.');
-  await Sharing.shareAsync(file.uri, { mimeType: mime, UTI: 'org.openxmlformats.spreadsheetml.sheet', dialogTitle: `Pontaj lunar · ${period}` });
+  if (!(await Sharing.isAvailableAsync())) throw new Error(tr("Partajarea fișierelor nu este disponibilă pe acest dispozitiv."));
+  await Sharing.shareAsync(file.uri, { mimeType: mime, UTI: 'org.openxmlformats.spreadsheetml.sheet', dialogTitle: `${tr("Pontaj lunar")} · ${period}` });
 }
 
 export async function exportHrPdf(
@@ -201,15 +210,18 @@ export async function exportHrPdf(
   shifts: readonly HrShift[],
   period: string,
   locationName = 'Toate locațiile',
+  locale: Locale = 'ro',
 ) {
+  const tr = workforceTranslator(locale);
+  const selectedLocation = locationName === 'Toate locațiile' ? tr('Toate locațiile') : locationName;
   const generatedAt = new Date();
-  const html = buildHrPdfHtml(employees, shifts, period, locationName, generatedAt);
-  if (Platform.OS === 'web') return Print.printAsync({ html });
+  const html = buildHrPdfHtml(employees, shifts, period, selectedLocation, generatedAt, locale);
+  if (Platform.OS === 'web') return printHtmlInBrowser(html);
   const { uri } = await Print.printToFileAsync({ html });
   const source = new File(uri);
   const target = new File(Paths.cache, hrReportFileName(period, 'pdf', generatedAt));
   if (target.exists) target.delete();
   await source.copy(target);
-  if (!(await Sharing.isAvailableAsync())) throw new Error('Partajarea fișierelor nu este disponibilă pe acest dispozitiv.');
-  await Sharing.shareAsync(target.uri, { mimeType: 'application/pdf', UTI: 'com.adobe.pdf', dialogTitle: `Pontaj lunar · ${period}` });
+  if (!(await Sharing.isAvailableAsync())) throw new Error(tr("Partajarea fișierelor nu este disponibilă pe acest dispozitiv."));
+  await Sharing.shareAsync(target.uri, { mimeType: 'application/pdf', UTI: 'com.adobe.pdf', dialogTitle: `${tr("Pontaj lunar")} · ${period}` });
 }

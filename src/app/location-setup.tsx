@@ -1,3 +1,5 @@
+import { locationErrorMessage } from '@/lib/locations-repository';
+import { useI18n } from '@/contexts/locale-context';
 /**
  * MANAGER 24/7™ by PARADIM — proprietary software.
  * Copyright © 2026 PARADIM Operations SRL. All rights reserved.
@@ -28,6 +30,7 @@ import { addLocation, getLocationSetupStatus, type LocationSetupStatus } from '@
 
 export default function LocationSetupScreen() {
   const router = useRouter();
+  const { locale, t } = useI18n();
   const auth = useAuth();
   const subscription = useSubscription();
   const userId = auth.user?.id ?? 'demo';
@@ -57,7 +60,7 @@ export default function LocationSetupScreen() {
   }, [auth.isAuthenticated, auth.isDemo, router, subscription.isViewer, userId, checkAttempt]);
 
   if (auth.isLoading || subscription.isLoading || setupStatus === 'checking') {
-    return <Screen scroll={false}><LoadingState label="Pregătim locația…" /></Screen>;
+    return <Screen scroll={false}><LoadingState label={t('operational.locations.loading')} /></Screen>;
   }
   if (!auth.isAuthenticated) return <Redirect href="/sign-in" />;
   if (!subscription.hasAccess) return <Redirect href="/paywall" />;
@@ -74,8 +77,8 @@ export default function LocationSetupScreen() {
       router.replace('/(app)');
     } catch (error) {
       Alert.alert(
-        'Locația nu a fost salvată',
-        error instanceof Error ? error.message : 'Verifică internetul și încearcă din nou.',
+        t('operational.locations.saveError'),
+        locationErrorMessage(error, locale, 'operational.locations.retry'),
       );
     } finally {
       setBusy(false);
@@ -87,28 +90,28 @@ export default function LocationSetupScreen() {
       <BrandHeader compact />
 
       <View style={styles.heading}>
-        <View style={styles.stepBadge}><Text style={styles.stepText}>PRIMUL PAS</Text></View>
-        <Title>Configurează locația</Title>
-        <Body>Acest cont va gestiona datele unei singure locații: rețete, producție, HR, P&amp;L și HACCP.</Body>
+        <View style={styles.stepBadge}><Text style={styles.stepText}>{t('operational.locations.first')}</Text></View>
+        <Title>{t('operational.locations.setup')}</Title>
+        <Body>{t('operational.locations.setupNote')}</Body>
       </View>
 
       <Card tone="gold">
-        <SectionHeader eyebrow="LOCAȚIA CONTULUI" title="Datele unității" />
+        <SectionHeader eyebrow={t('operational.locations.account')} title={t('operational.locations.details')} />
         <Field
-          label="Denumirea locației"
+          label={t('operational.locations.name')}
           value={name}
           onChangeText={setName}
-          placeholder="Ex: Restaurant Central"
+          placeholder={t('operational.locations.example')}
           autoFocus
         />
         <Field
-          label="Adresa"
+          label={t('operational.locations.address')}
           value={address}
           onChangeText={setAddress}
-          placeholder="Stradă, număr, localitate"
+          placeholder={t('operational.locations.addressExample')}
         />
         <AppButton
-          label="Creează locația și continuă"
+          label={t('operational.locations.create')}
           icon="business-outline"
           fullWidth
           loading={busy}
@@ -119,12 +122,12 @@ export default function LocationSetupScreen() {
 
       <Card tone="soft">
         <SectionHeader
-          eyebrow={subscription.isAdmin ? 'CONT ADMINISTRATOR' : 'PLAN STANDARD'}
-          title={subscription.isAdmin ? 'Poți adăuga mai multe ulterior' : 'O locație inclusă'}
+          eyebrow={subscription.isAdmin ? t('operational.locations.admin') : t('operational.locations.standard')}
+          title={subscription.isAdmin ? t('operational.locations.more') : t('operational.locations.one')}
         />
         <Body>{subscription.isAdmin
-          ? 'După configurare, vei putea crea, edita și șterge locații din Cont.'
-          : 'Poți edita această locație oricând din Cont. Accesul multi-locație va fi disponibil ca abonament suplimentar.'}</Body>
+          ? t('operational.locations.adminNote')
+          : t('operational.locations.singleNote')}</Body>
       </Card>
     </Screen>
   );

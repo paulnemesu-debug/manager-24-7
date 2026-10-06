@@ -10,6 +10,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { Platform } from 'react-native';
 import { downloadWebFile } from '@/lib/web-download';
+import { printHtmlInBrowser } from '@/lib/web-print';
 
 import {
   buildRecipeHtml,
@@ -42,7 +43,7 @@ export async function exportRecipePdf(recipe: Recipe, context: ExportContext): P
 
   if (Platform.OS === 'web') {
     // Pe web tipărirea deschide dialogul browserului, de unde se salvează ca PDF.
-    await Print.printAsync({ html });
+    await printHtmlInBrowser(html);
     return;
   }
 
@@ -80,7 +81,7 @@ export async function exportRecipeExcel(recipe: Recipe, context: ExportContext):
 export async function exportCookbookPdf(recipes: readonly Recipe[], context: ExportContext): Promise<void> {
   const html = buildCookbookHtml(recipes, context);
   if (Platform.OS === 'web') {
-    await Print.printAsync({ html });
+    await printHtmlInBrowser(html);
     return;
   }
   const { uri } = await Print.printToFileAsync({ html });
@@ -96,7 +97,7 @@ export async function exportCookbookPdf(recipes: readonly Recipe[], context: Exp
 export async function exportAllergenMenuPdf(recipes: readonly Recipe[], context: ExportContext): Promise<void> {
   const html = buildAllergenMenuHtml(recipes, context.locale, context.userEmail);
   if (Platform.OS === 'web') {
-    await Print.printAsync({ html });
+    await printHtmlInBrowser(html);
     return;
   }
   const { uri } = await Print.printToFileAsync({ html });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildRedistributionReportHtml, buildWasteDossierHtml, buildWastePlanHtml } from './waste-compliance-sheet';
+import { getWasteModelObjectives, wasteObjectivesForDraft } from './waste-compliance-model';
 import type { WasteEntry } from '@/types/operations-control';
 import type { FoodRedistribution, WastePreventionPlan, WasteReceiver } from '@/types/waste-compliance';
 
@@ -14,6 +15,40 @@ const transfer: FoodRedistribution = { id: 't1', locationId: null, transferDate:
 const waste: WasteEntry = { id: 'w1', locationId: null, eventDate: '2026-09-26', catalogId: null, itemName: 'Cartofi', quantity: 2, unit: 'kg', unitCost: 4, reason: 'preparation', notes: 'Coji', value: 8, createdAt: '', updatedAt: '', syncState: 'synced' };
 
 describe('waste compliance documents', () => {
+  it('changes untouched model objectives with locale and preserves explicit drafts', () => {
+    expect(wasteObjectivesForDraft(null, 'en')).toBe(getWasteModelObjectives('en'));
+    expect(wasteObjectivesForDraft(null, 'ro')).toBe(getWasteModelObjectives('ro'));
+    expect(getWasteModelObjectives('en')).not.toBe(getWasteModelObjectives('ro'));
+    for (const draft of ['', 'Obiectiv ales de utilizator', getWasteModelObjectives('ro')]) {
+      expect(wasteObjectivesForDraft(draft, 'en')).toBe(draft);
+    }
+  });
+  it('localizes the annual plan without translating or interpreting user text', () => {
+    const html = buildWastePlanHtml({ ...plan, objectives: 'Obiectiv scris de utilizator <script>' }, 'en');
+    expect(html).toContain('<html lang="en">');
+    expect(html).toContain('ANNUAL FOOD WASTE REDUCTION PLAN');
+    expect(html).toContain('Production and portion planning');
+    expect(html).toContain('Obiectiv scris de utilizator &lt;script&gt;');
+    expect(html).not.toContain('Măsuri selectate');
+  });
+  it('localizes annual report categories, totals and fallback destinations', () => {
+    const html = buildRedistributionReportHtml(2026, [{ ...transfer, destinationType: 'consumer' }], [], plan, 'en');
+    expect(html).toContain('ANNUAL FOOD REDISTRIBUTION REPORT');
+    expect(html).toContain('Food donated by the catering business');
+    expect(html).toContain('Final consumers');
+    expect(html).toContain('5.000');
+    expect(html).toContain('100.00 RON');
+    expect(html).toContain('Supă');
+  });
+  it('localizes every dossier section, statuses and waste reasons', () => {
+    const html = buildWasteDossierHtml(2026, plan, [transfer], [receiver], [waste], 'en');
+    for (const title of ['FOOD WASTE PREVENTION AND REDISTRIBUTION DOSSIER', 'ANNUAL PLAN', 'INTERNAL WASTE REGISTER', 'REDISTRIBUTION REGISTER', 'ANNUAL REPORT · ANNEX NO. 2', 'RECEIVING OPERATORS']) expect(html).toContain(title);
+    expect(html).toContain('Preparation loss');
+    expect(html).toContain('Compliant');
+    expect(html).toContain('Cartofi');
+    expect(html).toContain('Banca locală');
+    expect(html).not.toContain('REGISTRU INTERN DE RISIPĂ');
+  });
   it('builds a safe annual plan with selected measures', () => {
     const html = buildWastePlanHtml(plan);
     expect(html).toContain('PLAN ANUAL DE DIMINUARE');

@@ -1,3 +1,4 @@
+import { useI18n } from '@/contexts/locale-context';
 /**
  * MANAGER 24/7™ by PARADIM — proprietary software.
  * Copyright © 2026 PARADIM Operations SRL. All rights reserved.
@@ -28,6 +29,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 export default function ManagementControlScreen() {
   const auth = useAuth();
+  const { t } = useI18n();
   const { catalog, recipes } = useWorkspace();
   const { format } = usePreferences();
   const [date, setDate] = useState(today());
@@ -100,9 +102,9 @@ export default function ManagementControlScreen() {
         salesLines: salesLines.length,
         hasLabor: Boolean(employeeName.trim()),
       });
-      Alert.alert('Salvat', snapshot.syncState === 'synced' ? 'Controlul zilnic a fost sincronizat.' : 'Controlul zilnic este salvat offline și va putea fi sincronizat.');
+      Alert.alert(t('operational.management.saved'), snapshot.syncState === 'synced' ? t('operational.management.synced') : t('operational.management.offline'));
     } catch (error) {
-      Alert.alert('Nu s-a salvat', error instanceof Error ? error.message : 'Încearcă din nou.');
+      Alert.alert(t('operational.common.notSaved'), error instanceof Error ? error.message : t('operational.common.tryAgain'));
     } finally {
       setSaving(false);
     }
@@ -116,57 +118,57 @@ export default function ManagementControlScreen() {
       const mapped = mapSalesRows(parseSalesCsv(text), recipes.filter((item) => !item.isSubRecipe).map((item) => ({ id: item.id, title: item.title, portionCost: item.totals.portionCost })));
       setSales(Object.fromEntries(mapped.filter((item) => item.recipeId).map((item) => [item.recipeId!, item])));
       const unmatched = mapped.filter((item) => !item.recipeId).length;
-      Alert.alert('Vânzări importate', `${mapped.length - unmatched} preparate potrivite${unmatched ? ` · ${unmatched} rânduri necesită potrivire manuală` : ''}.`);
+      Alert.alert(t('operational.management.imported'), t('operational.management.importSummary', { matched: mapped.length - unmatched, unmatched: unmatched ? t('operational.management.unmatched', { count: unmatched }) : '' }));
     } catch {
-      Alert.alert('Import nereușit', 'Folosește un CSV cu denumire produs, cantitate și valoare.');
+      Alert.alert(t('operational.management.importError'), t('operational.management.csv'));
     }
   };
 
   return (
-    <Screen bottomSafeArea footer={<AppButton label="Salvează controlul zilnic" icon="checkmark-circle-outline" fullWidth loading={saving} onPress={() => void save()} />}>
-      <ToolHeader title="Control operațional" subtitle="Inventar, vânzări, personal și abaterea costului într-un singur raport." />
+    <Screen bottomSafeArea footer={<AppButton label={t('operational.management.save')} icon="checkmark-circle-outline" fullWidth loading={saving} onPress={() => void save()} />}>
+      <ToolHeader title={t('operational.management.title')} subtitle={t('operational.management.subtitle')} />
       <Card tone="navy">
-        <Field label="Data raportului" value={date} onChangeText={setDate} />
+        <Field label={t('operational.management.date')} value={date} onChangeText={setDate} />
         {!!locations.length && (
           <ChoiceRow
-            label="Locație"
+            label={t('operational.management.location')}
             options={[{ value: 'all', label: 'General' }, ...locations.map((location) => ({ value: location.id, label: location.name }))]}
             value={locationId}
             onChange={setLocationId}
           />
         )}
         <View style={styles.kpis}>
-          <Kpi label="Cost teoretic" value={format.money(variance.theoreticalCost)} />
-          <Kpi label="Consum real" value={format.money(variance.actualCost)} />
-          <Kpi label="Abatere" value={format.money(variance.varianceValue)} alert={variance.varianceValue > 0} />
+          <Kpi label={t('operational.management.theoreticalCost')} value={format.money(variance.theoreticalCost)} />
+          <Kpi label={t('operational.management.actualConsumption')} value={format.money(variance.actualCost)} />
+          <Kpi label={t('operational.management.variance')} value={format.money(variance.varianceValue)} alert={variance.varianceValue > 0} />
           <Kpi label="Prime Cost" value={prime.percent === null ? '—' : format.percent(prime.percent)} alert={(prime.percent ?? 0) > 65} />
         </View>
       </Card>
 
       <Card>
-        <SectionHeader eyebrow="INVENTAR RAPID" title="Stoc și consum real" />
-        <Body>Stoc inițial + intrări − stoc final = consum real. Completează numai produsele numărate.</Body>
+        <SectionHeader eyebrow={t('operational.management.quickInventory')} title={t('operational.management.stock')} />
+        <Body>{t('operational.management.formula')}</Body>
         {catalog.map((item) => (
           <View key={item.id} style={styles.row}>
             <View style={styles.copy}><Text style={styles.name}>{item.name}</Text><Text style={styles.meta}>{format.money(item.purchasePrice)}/{item.priceUnit}</Text></View>
-            <SmallField label="Inițial" value={inventory[item.id]?.openingQuantity} onChange={(v) => updateInventory(item.id, 'openingQuantity', v)} />
-            <SmallField label="Intrări" value={inventory[item.id]?.purchasesQuantity} onChange={(v) => updateInventory(item.id, 'purchasesQuantity', v)} />
-            <SmallField label="Final" value={inventory[item.id]?.closingQuantity} onChange={(v) => updateInventory(item.id, 'closingQuantity', v)} />
+            <SmallField label={t('operational.management.opening')} value={inventory[item.id]?.openingQuantity} onChange={(v) => updateInventory(item.id, 'openingQuantity', v)} />
+            <SmallField label={t('operational.management.receipts')} value={inventory[item.id]?.purchasesQuantity} onChange={(v) => updateInventory(item.id, 'purchasesQuantity', v)} />
+            <SmallField label={t('operational.management.closing')} value={inventory[item.id]?.closingQuantity} onChange={(v) => updateInventory(item.id, 'closingQuantity', v)} />
           </View>
         ))}
-        {!catalog.length && <StatusPill label="Adaugă mai întâi ingredientele" status="watch" />}
-        <Text style={styles.total}>Valoarea stocului final: {format.money(inventoryValue(inventoryLines))}</Text>
+        {!catalog.length && <StatusPill label={t('operational.management.empty')} status="watch" />}
+        <Text style={styles.total}>{t('operational.management.closingValue', { value: format.money(inventoryValue(inventoryLines)) })}</Text>
       </Card>
 
       {!!ingredientVariances.length && !!salesLines.length && (
         <Card tone={ingredientVariances.some((item) => item.varianceValue > 0) ? 'gold' : 'soft'}>
-          <SectionHeader eyebrow="VARIANȚĂ PE INGREDIENT" title="Teoretic vs. consum real" />
-          <Body>Pozitiv înseamnă că s-a consumat mai mult decât rezultă din rețetele vândute. Sortează automat pierderile cu impactul financiar cel mai mare.</Body>
+          <SectionHeader eyebrow={t('operational.management.ingredientVariance')} title={t('operational.management.comparison')} />
+          <Body>{t('operational.management.varianceNote')}</Body>
           <View style={styles.varianceHeader}>
             <Text style={[styles.varianceHead, styles.copy]}>Ingredient</Text>
-            <Text style={styles.varianceHead}>Teoretic</Text>
-            <Text style={styles.varianceHead}>Real</Text>
-            <Text style={styles.varianceHead}>Abatere</Text>
+            <Text style={styles.varianceHead}>{t('operational.management.theoretical')}</Text>
+            <Text style={styles.varianceHead}>{t('operational.management.actual')}</Text>
+            <Text style={styles.varianceHead}>{t('operational.management.variance')}</Text>
           </View>
           {ingredientVariances.slice(0, 12).map((item) => (
             <View key={item.catalogId ?? item.name} style={styles.varianceRow}>
@@ -188,30 +190,30 @@ export default function ManagementControlScreen() {
       )}
 
       <Card>
-        <SectionHeader eyebrow="VÂNZĂRI" title="Cost teoretic din rețete" />
-        <Body>Introdu cantitatea vândută și încasarea. Maparea rămâne legată de rețetă.</Body>
-        <AppButton label="Importă vânzări CSV/POS" icon="document-attach-outline" variant="secondary" onPress={() => void importSales()} />
+        <SectionHeader eyebrow={t('operational.management.sales')} title={t('operational.management.recipeCost')} />
+        <Body>{t('operational.management.salesNote')}</Body>
+        <AppButton label={t('operational.management.import')} icon="document-attach-outline" variant="secondary" onPress={() => void importSales()} />
         {recipes.filter((recipe) => !recipe.isSubRecipe).map((recipe) => (
           <View key={recipe.id} style={styles.row}>
-            <View style={styles.copy}><Text style={styles.name}>{recipe.title}</Text><Text style={styles.meta}>Cost {format.money(recipe.totals.portionCost)}/porție</Text></View>
-            <SmallField label="Porții" value={sales[recipe.id]?.quantity} onChange={(v) => updateSale(recipe.id, 'quantity', v)} />
-            <SmallField label="Încasări" value={sales[recipe.id]?.revenue} onChange={(v) => updateSale(recipe.id, 'revenue', v)} />
+            <View style={styles.copy}><Text style={styles.name}>{recipe.title}</Text><Text style={styles.meta}>{t('operational.management.portionCost', { value: format.money(recipe.totals.portionCost) })}</Text></View>
+            <SmallField label={t('operational.management.portions')} value={sales[recipe.id]?.quantity} onChange={(v) => updateSale(recipe.id, 'quantity', v)} />
+            <SmallField label={t('operational.management.revenue')} value={sales[recipe.id]?.revenue} onChange={(v) => updateSale(recipe.id, 'revenue', v)} />
           </View>
         ))}
       </Card>
 
       <Card tone="soft">
-        <SectionHeader eyebrow="PERSONAL" title="Costul real al turei" />
-        <Field label="Angajat" value={employeeName} onChangeText={setEmployeeName} />
-        <Field label="Rol" value={employeeRole} onChangeText={setEmployeeRole} />
-        <View style={styles.inline}><Field style={styles.flex} label="Ore" keyboardType="decimal-pad" value={hours} onChangeText={setHours} /><Field style={styles.flex} label="Cost total/oră" keyboardType="decimal-pad" value={hourlyCost} onChangeText={setHourlyCost} /></View>
-        <Text style={styles.total}>Cost tură: {format.money(payroll)}</Text>
+        <SectionHeader eyebrow={t('operational.management.staff')} title={t('operational.management.shiftCost')} />
+        <Field label={t('operational.management.employee')} value={employeeName} onChangeText={setEmployeeName} />
+        <Field label={t('operational.management.role')} value={employeeRole} onChangeText={setEmployeeRole} />
+        <View style={styles.inline}><Field style={styles.flex} label={t('operational.management.hours')} keyboardType="decimal-pad" value={hours} onChangeText={setHours} /><Field style={styles.flex} label={t('operational.management.hourlyCost')} keyboardType="decimal-pad" value={hourlyCost} onChangeText={setHourlyCost} /></View>
+        <Text style={styles.total}>{t('operational.management.payroll', { value: format.money(payroll) })}</Text>
       </Card>
 
       {variance.varianceValue > 0 && (
         <Card tone="gold">
-          <View style={styles.alertTitle}><Ionicons name="alert-circle-outline" size={22} color={Brand.amber} /><Text style={styles.name}>Consum peste costul teoretic</Text></View>
-          <Body>Verifică prețurile de achiziție, porționarea, pierderile, producția nevândută și respectarea rețetelor.</Body>
+          <View style={styles.alertTitle}><Ionicons name="alert-circle-outline" size={22} color={Brand.amber} /><Text style={styles.name}>{t('operational.management.over')}</Text></View>
+          <Body>{t('operational.management.overNote')}</Body>
         </Card>
       )}
     </Screen>

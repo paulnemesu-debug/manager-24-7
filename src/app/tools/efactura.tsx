@@ -1,3 +1,4 @@
+import { useI18n } from '@/contexts/locale-context';
 /**
  * MANAGER 24/7™ by PARADIM — proprietary software.
  * Copyright © 2026 PARADIM Operations SRL. All rights reserved.
@@ -9,22 +10,27 @@ import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import { readDocumentText } from '@/lib/document-bytes';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Alert, Linking, StyleSheet, Text, View } from 'react-native';
 
 import { ToolHeader } from '@/components/tool-header';
 import { AppButton, Body, Card, Screen, SectionHeader, StatusPill } from '@/components/ui';
 import { Brand, Fonts, TabularNumbers } from '@/constants/theme';
+import { useAuth } from '@/contexts/auth-context';
 import { usePreferences } from '@/contexts/preferences-context';
-import { parseEfacturaXml, type EFacturaDocument } from '@/lib/efactura';
+import { efacturaToScannedInvoice, parseEfacturaXml } from '@/lib/efactura';
+import { stageInvoiceImport } from '@/lib/invoice-import-handoff';
 
 const OAUTH_REGISTRATION_URL = 'https://www.anaf.ro/InregOauth/';
 const API_GUIDE_URL = 'https://mfinante.gov.ro/static/10/eFactura/prezentare%20api%20efactura.pdf';
 
 export default function EFacturaScreen() {
   const router = useRouter();
+  const auth = useAuth();
+  const { locale, t } = useI18n();
   const { format } = usePreferences();
-  const [document, setDocument] = useState<EFacturaDocument | null>(null);
+  const [xml, setXml] = useState<string | null>(null);
+  const document = useMemo(() => xml ? parseEfacturaXml(xml, locale) : null, [xml, locale]);
   const [fileName, setFileName] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -33,56 +39,57 @@ export default function EFacturaScreen() {
     if (picked.canceled || !picked.assets[0]) return;
     const asset = picked.assets[0];
     if ((asset.size ?? 0) > 10_000_000) {
-      Alert.alert('Fișier prea mare', 'Limita pentru verificarea locală este 10 MB.');
+      Alert.alert(t('operational.efactura.tooLarge'), t('operational.efactura.sizeLimit'));
       return;
     }
     setBusy(true);
     try {
-      const parsed = parseEfacturaXml(await readDocumentText(asset.uri));
-      setDocument(parsed);
+      const content = await readDocumentText(asset.uri);
+      parseEfacturaXml(content, locale);
+      setXml(content);
       setFileName(asset.name);
     } catch (error) {
       const code = error instanceof Error ? error.message : '';
       const message = code === 'efactura_unsafe_xml'
-        ? 'Fișierul conține o declarație DTD/ENTITY și a fost blocat pentru siguranță.'
+        ? t('operational.efactura.unsafe')
         : code === 'efactura_invalid_root'
-          ? 'Fișierul nu are rădăcină UBL Invoice sau CreditNote.'
-          : 'XML-ul nu a putut fi citit.';
-      Alert.alert('Document e-Factura invalid', message);
+          ? t('operational.efactura.invalidRoot')
+          : t('operational.efactura.unreadable');
+      Alert.alert(t('operational.efactura.invalid'), message);
     } finally { setBusy(false); }
   };
 
   return (
     <Screen>
-      <ToolHeader title="e-Factura / SPV" subtitle="Import UBL local și pregătirea conexiunii ANAF." />
+      <ToolHeader title="e-Factura / SPV" subtitle={t('operational.efactura.subtitle')} />
 
       <Card tone="navy">
         <View style={styles.heroTop}>
           <View style={styles.heroIcon}><Ionicons name="shield-checkmark-outline" size={25} color={Brand.navyDeep} /></View>
           <View style={styles.copy}>
-            <Text style={styles.heroTitle}>Conector SPV sigur</Text>
-            <StatusPill label="Necesită OAuth + certificat" status="watch" />
+            <Text style={styles.heroTitle}>{t('operational.efactura.connector')}</Text>
+            <StatusPill label={t('operational.efactura.requires')} status="watch" />
           </View>
         </View>
-        <Body light>Tokenul ANAF nu se cere și nu se păstrează în aplicația mobilă. Conectarea live trebuie făcută printr-un serviciu backend autorizat de unitate.</Body>
+        <Body light>{t('operational.efactura.tokenNote')}</Body>
       </Card>
 
       <Card>
-        <SectionHeader eyebrow="PREGĂTIRE SPV" title="Ce trebuie configurat o singură dată" />
-        <Checklist index="1" title="Certificat digital calificat" body="Asociat contribuabilului și contului SPV care autorizează accesul." />
-        <Checklist index="2" title="Aplicație OAuth înregistrată la ANAF" body="Client ID și callback controlat de backend, nu de telefon." />
-        <Checklist index="3" title="Seif de tokenuri pe server" body="Access/refresh token criptat, rotație, jurnal de acces și revocare." />
-        <Checklist index="4" title="Upload, stare și descărcare" body="Trimiterea XML, interogarea stării și arhivarea răspunsului ANAF." />
+        <SectionHeader eyebrow={t('operational.efactura.setup')} title={t('operational.efactura.once')} />
+        <Checklist index="1" title={t('operational.efactura.certificate')} body={t('operational.efactura.certificateNote')} />
+        <Checklist index="2" title={t('operational.efactura.oauth')} body={t('operational.efactura.oauthNote')} />
+        <Checklist index="3" title={t('operational.efactura.vault')} body={t('operational.efactura.vaultNote')} />
+        <Checklist index="4" title={t('operational.efactura.upload')} body={t('operational.efactura.uploadNote')} />
         <View style={styles.actions}>
-          <AppButton label="Înregistrare OAuth ANAF" icon="open-outline" variant="secondary" onPress={() => void Linking.openURL(OAUTH_REGISTRATION_URL)} />
-          <AppButton label="Ghid API e-Factura" icon="document-text-outline" variant="ghost" onPress={() => void Linking.openURL(API_GUIDE_URL)} />
+          <AppButton label={t('operational.efactura.register')} icon="open-outline" variant="secondary" onPress={() => void Linking.openURL(OAUTH_REGISTRATION_URL)} />
+          <AppButton label={t('operational.efactura.guide')} icon="document-text-outline" variant="ghost" onPress={() => void Linking.openURL(API_GUIDE_URL)} />
         </View>
       </Card>
 
       <Card tone="soft">
-        <SectionHeader eyebrow="DISPONIBIL ACUM" title="Verifică un XML UBL local" />
-        <Body>Fișierul este citit pe dispozitiv. Verificarea confirmă structura și câmpurile esențiale; acceptarea fiscală finală o stabilește validarea ANAF.</Body>
-        <AppButton label="Alege XML e-Factura" icon="cloud-upload-outline" fullWidth loading={busy} onPress={() => void pickXml()} />
+        <SectionHeader eyebrow={t('operational.efactura.available')} title={t('operational.efactura.validate')} />
+        <Body>{t('operational.efactura.validateNote')}</Body>
+        <AppButton label={t('operational.efactura.choose')} icon="cloud-upload-outline" fullWidth loading={busy} onPress={() => void pickXml()} />
       </Card>
 
       {document && (
@@ -90,15 +97,15 @@ export default function EFacturaScreen() {
           <Card tone={document.errors.length ? 'gold' : 'soft'}>
             <View style={styles.resultHeader}>
               <View style={styles.copy}>
-                <Text style={styles.resultTitle}>{document.invoiceNumber || fileName || 'Document UBL'}</Text>
+                <Text style={styles.resultTitle}>{document.invoiceNumber || fileName || t('operational.efactura.document')}</Text>
                 <Text style={styles.meta}>{[document.issueDate, document.supplierName, document.currency].filter(Boolean).join(' · ')}</Text>
               </View>
-              <StatusPill label={document.errors.length ? `${document.errors.length} erori` : 'Structură OK'} status={document.errors.length ? 'critical' : 'healthy'} />
+              <StatusPill label={document.errors.length ? t('operational.efactura.errorCount', { count: document.errors.length }) : t('operational.efactura.structure')} status={document.errors.length ? 'critical' : 'healthy'} />
             </View>
             <View style={styles.metrics}>
-              <Metric label="Furnizor" value={document.supplierTaxId || '—'} />
-              <Metric label="Client" value={document.customerTaxId || '—'} />
-              <Metric label="Linii" value={String(document.lines.length)} />
+              <Metric label={t('operational.documents.supplier')} value={document.supplierTaxId || '—'} />
+              <Metric label={t('operational.efactura.customer')} value={document.customerTaxId || '—'} />
+              <Metric label={t('operational.efactura.lines')} value={String(document.lines.length)} />
               <Metric label="Total" value={document.payableAmount === null ? '—' : format.money(document.payableAmount)} />
             </View>
             {document.errors.map((message) => <Notice key={message} critical text={message} />)}
@@ -106,18 +113,21 @@ export default function EFacturaScreen() {
           </Card>
 
           <Card>
-            <SectionHeader title="Linii factură" />
+            <SectionHeader title={t('operational.efactura.invoiceLines')} />
             {document.lines.slice(0, 100).map((line) => (
               <View key={`${line.id}:${line.name}`} style={styles.line}>
                 <View style={styles.copy}>
                   <Text style={styles.lineName}>{line.name}</Text>
-                  <Text style={styles.meta}>{line.quantity ?? '—'} {line.unit ?? line.unitCode ?? '—'} · TVA {line.vatPercent ?? '—'}%</Text>
+                  <Text style={styles.meta}>{line.quantity ?? '—'} {line.unit ?? line.unitCode ?? '—'} · {t('operational.efactura.vat')} {line.vatPercent ?? '—'}%</Text>
                 </View>
                 <Text style={styles.linePrice}>{line.unitPrice === null ? '—' : format.money(line.unitPrice)}</Text>
               </View>
             ))}
           </Card>
-          <AppButton label="Importă prețurile din e-Factura" icon="pricetags-outline" fullWidth onPress={() => router.push('/tools/invoice-import')} />
+          <AppButton label={t('operational.efactura.import')} icon="pricetags-outline" fullWidth onPress={() => {
+            const handoff = stageInvoiceImport(auth.user?.id ?? 'demo', efacturaToScannedInvoice(document), fileName ?? t('operational.efactura.document'));
+            router.push({ pathname: '/tools/invoice-import', params: { handoff } });
+          }} />
         </>
       )}
     </Screen>

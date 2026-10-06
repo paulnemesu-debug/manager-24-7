@@ -1,6 +1,7 @@
+const { resolveSourceName, sourceFile, evaluateSource } = require('./source-loader.cjs');
 /* Interaction checks use native adapters; they do not substitute for device testing. */
 const fs = require('fs'), path = require('path'), assert = require('node:assert/strict');
-const React = require('react'), { create, act } = require('react-test-renderer'), ts = require('typescript');
+const React = require('react'), { create, act } = require('react-test-renderer');
 global.IS_REACT_ACT_ENVIRONMENT = true;
 const project = path.resolve(__dirname, '../..'), cache = new Map(), e = React.createElement;
 const storage = new Map(), routes = [], alerts = [], checks = [];
@@ -10,29 +11,27 @@ const node = type => props => e(type, props, props.children);
 const mocks = {
   react: React,
   'react-native': { View: 'View', Text: 'Text', Pressable: 'Pressable', Platform: { OS: 'android', select: values => values.android ?? values.default }, StyleSheet: { create: x => x }, Alert: { alert: (...args) => alerts.push(args) }, AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) } },
-  '@react-native-async-storage/async-storage': { __esModule: true, default: { getItem: async key => storage.get(key) ?? null, setItem: async (key, value) => storage.set(key, value), getAllKeys: async () => [...storage.keys()], multiRemove: async keys => keys.forEach(key => storage.delete(key)) } },
+  '@react-native-async-storage/async-storage': { __esModule: true, default: { getItem: async key => storage.get(key) ?? null, setItem: async (key, value) => storage.set(key, value), getAllKeys: async () => [...storage.keys()], multiRemove: async keys => keys.forEach(key => storage.delete(key)), multiSet: async pairs => pairs.forEach(([key, value]) => storage.set(key, value)) } },
   '@expo/vector-icons': { Ionicons: node('Icon') },
+  'expo-haptics': { notificationAsync: async () => {}, NotificationFeedbackType: { Success: 'success', Error: 'error' } },
   'expo-router': { useRouter: () => ({ push: route => routes.push(route), setParams: value => { params = value; } }), useLocalSearchParams: () => params, useFocusEffect: callback => React.useEffect(callback, [callback]) },
-  '@/components/ui': Object.fromEntries(['AppButton','Body','Card','Field','Screen','SectionHeader','StatusPill'].map(key => [key, node(key)])),
+  '@/components/ui': Object.fromEntries(['AppButton','Body','Card','Field','Screen','SectionHeader','StatusPill','BrandHeader','ListSkeleton'].map(key => [key, node(key)])),
+  '@/components/sync-banner': { SyncBanner: node('SyncBanner') },
   '@/components/tool-header': { ToolHeader: node('ToolHeader') },
   '@/components/inputs': { Select: node('Select') },
   '@/contexts/auth-context': { useAuth: () => ({ user: null, isDemo: true }) },
-  '@/contexts/locale-context': { useI18n: () => ({ locale: 'ro' }) },
+  '@/contexts/locale-context': { useI18n: () => ({ locale: 'ro', t: (key, params) => load('@/i18n/translations').translate('ro', key, params) }) },
+  '@/contexts/preferences-context': { usePreferences: () => ({ format: { money: String, percent: String } }) },
   '@/contexts/workspace-context': { useWorkspace: () => ({ recipes, catalog }) },
   '@/lib/supabase': { isDemoMode: false, isSupabaseConfigured: false, supabase: null },
 };
-function load(name) {
+function load(name, importer) {
+  name = resolveSourceName(name, importer, project);
   if (mocks[name]) return mocks[name];
   if (!name.startsWith('@/')) return require(name);
   const stem = path.join(project, 'src', name.slice(2));
   if (name.endsWith('.json')) return JSON.parse(fs.readFileSync(stem, 'utf8'));
-  const file = ['.ts','.tsx'].map(ext => stem + ext).find(fs.existsSync);
-  if (!file) throw Error(`Missing source ${name}`);
-  if (cache.has(file)) return cache.get(file).exports;
-  const module = { exports: {} }; cache.set(file, module);
-  const code = ts.transpileModule(fs.readFileSync(file, 'utf8'), { fileName: file, compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
-  new Function('require','module','exports', code)(load, module, module.exports);
-  return module.exports;
+  return evaluateSource(sourceFile(stem), load, cache);
 }
 let tree;
 const find = (type, predicate = () => true) => tree.root.findAll(n => n.type === type && predicate(n));
@@ -85,13 +84,35 @@ async function selectStatus(status) { await act(async () => find('Select', n => 
   await press(links.find(item => item.findAllByType('Text').some(text => text.children.some(value => typeof value === 'string' && value.includes('HACCP')))) ?? links[0]);
   assert(routes.some(route => typeof route === 'string' && route.startsWith('/tools/')));
   checks.push('Daily Manager renders actual priorities and opens a remediation screen');
+  await load('@/lib/instant-demo').seedInstantDemo('ro');
+  await mount(load('@/app/(app)/index').default);
+  assert(find('Text', item => item.children.join('') === '1 prezenți · 1 fără pontaj astăzi').length === 1);
+  checks.push('Home counts a scheduled shift as pending attendance and leave as recorded');
+  const pnlCacheKey = 'manager247.pnl_reports.v1.demo';
+  const savedPnl = storage.get(pnlCacheKey);
+  assert(savedPnl, 'A saved report must exist for the stale-payroll regression');
+  const assertCurrentPnlAgreement = async (netResult) => {
+    await mount(load('@/app/(app)/index').default);
+    assert(find('Text', item => item.children.join('') === String(netResult)).length === 1, `Home should show current HR payroll: net ${netResult}`);
+    assert(find('Text', item => item.children.join('').includes(String(netResult / 152000 * 100))).length === 1, 'Home net margin must use the same current payroll');
+    await mount(load('@/app/tools/pnl').default);
+    assert(find('Text', item => item.children.join('') === String(netResult)).length >= 1, `P&L should agree with Home: net ${netResult}`);
+    assert(find('Text', item => item.children.join('') === String(netResult / 152000 * 100)).length === 1, 'P&L net margin must agree with Home');
+    assert.equal(storage.get(pnlCacheKey), savedPnl, 'Viewing current payroll must not rewrite the saved report');
+  };
+  await assertCurrentPnlAgreement(37500);
+  checks.push('Home and P&L agree when saved payroll differs from current active-employee salaries');
+  const hrLifecycle = load('@/lib/hr-lifecycle');
+  const alexLifecycle = (await hrLifecycle.loadHrLifecycle('demo')).find(item => item.employeeId === 'demo-employee-alex');
+  await hrLifecycle.saveHrLifecycle('demo', {
+    ...alexLifecycle, status: 'left', exitDate: load('@/lib/local-date-time').localIsoDate(),
+    equipmentReturned: true, keysReturned: true, accessRevoked: true, handover: true, finalDocuments: true,
+  });
+  await assertCurrentPnlAgreement(46500);
+  checks.push('Home and P&L both exclude inactive employees without rewriting stored P&L');
   assert.equal(alerts.length, 0);
   await act(async () => tree.unmount());
   const result = { passed: checks.length, checks, limitations: ['Native adapters; physical Android behavior is validated separately.'] };
   fs.writeFileSync(path.join(project, 'qa-results', 'operational-flow-checks.json'), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result, null, 2));
 })().catch(error => { console.error(error); process.exitCode = 1; if (tree) tree.unmount(); });
-
-
-
-

@@ -193,8 +193,9 @@ export function HaccpWorkspace({ embedded = false }: { embedded?: boolean }) {
     </View>
   </>;
 
-  if (view === 'control') return <FolderHub layout="grid" header={heading}>
+  if (view === 'control') return <FolderHub layout="grid" header={heading} notice={
     <FolderLink title={locale === 'ro' ? 'Control Mode · DSVSA / DSP / ITM' : 'Control Mode · inspections'} summary={locale === 'ro' ? 'Scor de pregătire și neconformități de rezolvat' : 'Readiness score and issues to resolve'} icon="shield-checkmark-outline" onPress={() => router.push('/tools/control-mode' as never)} />
+  }>
     <FolderSection id="records" icon="document-text-outline" photo="exports" title={locale === 'ro' ? 'Dosar și export PDF' : 'Records and PDF export'} summary={locale === 'ro' ? 'Arhivă, sincronizare și pachet pentru control' : 'Archive, sync and inspection pack'}>
       <Card tone="soft" style={styles.summaryCard}>
         <View style={styles.summaryTop}>

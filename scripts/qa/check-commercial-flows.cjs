@@ -1,6 +1,7 @@
+const { resolveSourceName, sourceFile, evaluateSource } = require('./source-loader.cjs');
 /* Execute commercial screen flows using native adapters; this is not a device test. */
 const fs = require('fs'), path = require('path'), assert = require('node:assert/strict');
-const React = require('react'), { create, act } = require('react-test-renderer'), ts = require('typescript');
+const React = require('react'), { create, act } = require('react-test-renderer');
 global.IS_REACT_ACT_ENVIRONMENT = true;
 const project = path.resolve(__dirname, '../..'), cache = new Map(), e = React.createElement;
 const routes = [], writes = [], remembered = [], alerts = [], checks = [];
@@ -31,18 +32,13 @@ const mocks = {
   '@/lib/price-alert-notifier': { notifyPriceAlert: async () => {}, priceAlertMessage: () => null },
   '@/lib/document-bytes': { readDocumentText: async () => 'Preparat;Portii\nPui;20', readDocumentBytes: async () => { throw Error('Unexpected byte read'); } },
 };
-function load(name) {
+function load(name, importer) {
+  name = resolveSourceName(name, importer, project);
   if (mocks[name]) return mocks[name];
   if (!name.startsWith('@/')) return require(name);
   const stem = path.join(project, 'src', name.slice(2));
   if (name.endsWith('.json')) return JSON.parse(fs.readFileSync(stem, 'utf8'));
-  const file = ['.ts','.tsx'].map(ext => stem + ext).find(fs.existsSync);
-  if (!file) throw Error(`Missing source ${name}`);
-  if (cache.has(file)) return cache.get(file).exports;
-  const module = { exports: {} }; cache.set(file, module);
-  const code = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS,
-    target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
-  new Function('require','module','exports',code)(load,module,module.exports); return module.exports;
+  return evaluateSource(sourceFile(stem), load, cache);
 }
 let tree;
 const find = (type, predicate = () => true) => tree.root.findAll(n => n.type === type && predicate(n));

@@ -72,6 +72,8 @@ export interface RecipeComplianceDraft {
   nutritionNotes: string | null;
   templateId: string | null;
   sourceReference: string | null;
+  /** Imported reference data needs explicit quantity, unit and purchase-price review. */
+  sourceReviewRequired?: boolean;
 }
 
 export interface IngredientDraft {

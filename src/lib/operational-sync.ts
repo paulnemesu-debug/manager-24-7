@@ -1,3 +1,4 @@
+import { translate, type Locale, type TranslationKey } from '@/i18n/translations';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { withStorageLock } from '@/lib/storage-lock';
 import { isDemoMode, isSupabaseConfigured, supabase } from '@/lib/supabase';
@@ -22,9 +23,9 @@ export function createOperationalStore<T extends RecordBase>(options: {
     const raw = await AsyncStorage.getItem(options.key(userId));
     if (!raw) return [];
     const value: unknown = JSON.parse(raw);
-    if (!Array.isArray(value)) throw new Error('Datele locale nu pot fi citite. Păstrează copia de siguranță a contului.');
+    if (!Array.isArray(value)) throw new OperationalError('operational.sync.invalidLocal');
     const items = value.map(options.normalize);
-    if (items.some((item) => item === null)) throw new Error('O înregistrare locală nu poate fi citită. Exportă datele contului înainte de recuperare.');
+    if (items.some((item) => item === null)) throw new OperationalError('operational.sync.invalidRecord');
     return items as T[];
   };
   const write = async (userId: string, items: T[]) => {
@@ -33,7 +34,7 @@ export function createOperationalStore<T extends RecordBase>(options: {
   };
   const fromRemote = (row: RemoteRecord): T => {
     const item = options.normalize({ ...row.data, updatedAt: row.updated_at });
-    if (!item || options.id(item) !== row.id) throw new Error('Răspuns de sincronizare invalid.');
+    if (!item || options.id(item) !== row.id) throw new OperationalError('operational.sync.invalidResponse');
     return { ...item, serverVersion: Number(row.version), syncState: 'synced', remoteConflict: undefined };
   };
   const payload = (item: T) => {
@@ -79,9 +80,9 @@ export function createOperationalStore<T extends RecordBase>(options: {
     save: (userId: string, draft: T) => locked(userId, async () => {
       const items = await read(userId);
       const normalizedDraft = options.normalize(draft);
-      if (!normalizedDraft) throw new Error('Înregistrare invalidă.');
+      if (!normalizedDraft) throw new OperationalError('operational.sync.invalid');
       const old = items.find((item) => options.id(item) === options.id(draft));
-      if (old?.syncState === 'conflict') throw new Error('Rezolvă mai întâi conflictul cu versiunea din cont.');
+      if (old?.syncState === 'conflict') throw new OperationalError('operational.sync.resolveFirst');
       const item: T = { ...normalizedDraft, updatedAt: new Date().toISOString(), serverVersion: draft.serverVersion ?? old?.serverVersion ?? 0,
         syncState: operationalCloudEnabled(userId) ? 'pending' : 'local', remoteConflict: undefined };
       const saved = await write(userId, [item, ...items.filter((other) => options.id(other) !== options.id(item))]);
@@ -101,9 +102,18 @@ export function createOperationalStore<T extends RecordBase>(options: {
   };
 }
 
-export function operationalSyncLabel(item: OperationalSync) {
-  if (item.syncState === 'conflict') return 'Modificat și pe alt dispozitiv · alege versiunea';
-  if (item.syncState === 'synced') return 'Sincronizat';
-  if (item.syncState === 'pending') return 'Salvat pe dispozitiv · sincronizare în așteptare';
-  return 'Salvat pe dispozitiv';
+export function operationalSyncLabel(item: OperationalSync, locale: Locale = 'ro') {
+  const t = (key: TranslationKey, params?: Record<string, string | number>) => translate(locale, key, params);
+
+  if (item.syncState === 'conflict') return t('operational.sync.conflict');
+  if (item.syncState === 'synced') return t('operational.sync.synced');
+  if (item.syncState === 'pending') return t('operational.sync.pending');
+  return t('operational.sync.local');
+}
+
+export class OperationalError extends Error {
+  constructor(readonly translationKey: TranslationKey) { super(translate('ro', translationKey)); }
+}
+export function operationalErrorMessage(error: unknown, locale: Locale, fallbackKey: TranslationKey = 'operational.common.tryAgain') {
+  return error instanceof OperationalError ? translate(locale, error.translationKey) : error instanceof Error ? error.message : translate(locale, fallbackKey);
 }

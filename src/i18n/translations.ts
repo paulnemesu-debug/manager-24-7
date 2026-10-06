@@ -5,6 +5,9 @@
  * See LICENSE-PROPRIETARY.md.
  */
 
+import { wasteRo, wasteEn } from './waste-translations';
+import { operationalRo, operationalEn } from './operational-translations';
+
 export const SUPPORTED_LOCALES = ['ro', 'en'] as const;
 export type Locale = (typeof SUPPORTED_LOCALES)[number];
 
@@ -19,6 +22,8 @@ export const INTL_LOCALE: Record<Locale, string> = {
 };
 
 const ro = {
+  ...operationalRo,
+  ...wasteRo,
   'menu.gapToTarget': 'Comparație cu ținta de Food Cost a rețetei.',
   'menu.gapToAverage': 'Comparație cu marja medie a preparatelor cu vânzări introduse.',
   "nutrition.genericEstimate": "Estimare automată pe aliment generic. Verifică ipoteza din Sursă și înlocuiește valorile cu eticheta produsului când o ai.",
@@ -1211,6 +1216,8 @@ const ro = {
 export type TranslationKey = keyof typeof ro;
 
 const en: Record<TranslationKey, string> = {
+  ...operationalEn,
+  ...wasteEn,
   'menu.gapToTarget': 'Compared with the recipe Food Cost target.',
   'menu.gapToAverage': 'Compared with the average margin of dishes with recorded sales.',
   "nutrition.genericEstimate": "Automatic estimate using a generic food. Review the assumption under Source and replace it with the product label when available.",

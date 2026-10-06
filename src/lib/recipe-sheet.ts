@@ -13,6 +13,7 @@ import { CATEGORY_LABEL_KEY } from '@/constants/categories';
 import { SITE_URL } from '@/constants/paradim';
 import type { Locale, TranslationKey } from '@/i18n/translations';
 import { calculateIngredientCost } from '@/lib/calculations';
+import { displayUnit } from '@/lib/display-unit';
 import { createExcelWorkbook, type ExcelWorkbook } from '@/lib/excel-workbook';
 import type { Formatters } from '@/lib/format';
 import {
@@ -100,7 +101,7 @@ export function buildRecipeRows(recipe: Recipe, context: ExportContext): SheetRo
       gross: ingredient.lossPercent > 0
         ? format.number(grossQuantity(ingredient.quantity, ingredient.lossPercent))
         : null,
-      unit: ingredient.unit,
+      unit: displayUnit(ingredient.unit, locale),
       cost: format.money(calculateIngredientCost(ingredient)),
       allergens: ingredient.allergens.map((allergen) => ALLERGEN_LABELS[locale][allergen]),
       allergenCodes: [...ingredient.allergens],

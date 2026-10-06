@@ -21,6 +21,7 @@ import { usePreferences } from '@/contexts/preferences-context';
 import { useSubscription } from '@/contexts/subscription-context';
 import { useWorkspace } from '@/contexts/workspace-context';
 import { calculateUnitPrice } from '@/lib/calculations';
+import { displayUnit } from '@/lib/display-unit';
 import { listPriceHistory, type PriceHistoryEntry } from '@/lib/catalog-repository';
 import { createEmptyIngredientNutrition, enrichIngredientNutrition, normalizeIngredientNutrition } from '@/lib/nutrition';
 import { recipesUsingCatalogIngredient } from '@/lib/recipe-graph';
@@ -81,6 +82,7 @@ function draftFrom(entry?: CatalogIngredient): CatalogIngredientDraft {
 export function IngredientEditor({ entry }: { entry?: CatalogIngredient }) {
   const router = useRouter();
   const { t, locale } = useI18n();
+  const unitLabel = (unit: PriceUnit) => displayUnit(unit, locale);
   const { format } = usePreferences();
   const { isViewer } = useSubscription();
   const { saveCatalogIngredient, removeCatalogIngredient, recipes } = useWorkspace();
@@ -119,7 +121,7 @@ export function IngredientEditor({ entry }: { entry?: CatalogIngredient }) {
 
   const unitOptions: SelectOption<PriceUnit>[] = priceUnits.map((unit) => ({
     value: unit,
-    label: unit,
+    label: unitLabel(unit),
   }));
 
   const setField = <K extends keyof CatalogIngredientDraft>(
@@ -291,7 +293,7 @@ export function IngredientEditor({ entry }: { entry?: CatalogIngredient }) {
           <Field
             style={styles.rowField}
             label={t('ingredientEditor.packageQuantity')}
-            hint={t('ingredientEditor.packageQuantityHint', { unit: draft.priceUnit })}
+            hint={t('ingredientEditor.packageQuantityHint', { unit: unitLabel(draft.priceUnit) })}
             keyboardType="decimal-pad"
             value={draft.packageQuantity ? String(draft.packageQuantity) : ''}
             onChangeText={(value) => setPackageField('packageQuantity', toNumber(value))}
@@ -307,7 +309,7 @@ export function IngredientEditor({ entry }: { entry?: CatalogIngredient }) {
           <View style={styles.unitResult}>
             <Text style={styles.unitResultLabel}>{t('ingredientEditor.unitResult')}</Text>
             <Text style={styles.unitResultValue}>
-              {format.money(calculatedUnitPrice)} / {draft.priceUnit}
+              {format.money(calculatedUnitPrice)} / {unitLabel(draft.priceUnit)}
             </Text>
           </View>
         )}
@@ -379,7 +381,7 @@ export function IngredientEditor({ entry }: { entry?: CatalogIngredient }) {
         {potentialSaving > 0 && (
           <View style={styles.savingBox}>
             <Text style={styles.savingLabel}>{t('ingredientEditor.potentialSaving')}</Text>
-            <Text style={styles.savingValue}>{format.money(potentialSaving)} / {draft.priceUnit}</Text>
+            <Text style={styles.savingValue}>{format.money(potentialSaving)} / {unitLabel(draft.priceUnit)}</Text>
           </View>
         )}
         {offers.map((offer) => (

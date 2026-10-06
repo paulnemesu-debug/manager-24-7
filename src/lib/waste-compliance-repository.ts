@@ -1,3 +1,4 @@
+import { OperationalError } from '@/lib/operational-sync';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { isDemoMode, isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { quantityInKg } from '@/lib/waste-compliance-model';
@@ -79,7 +80,7 @@ export async function saveWasteReceiver(userId: string, draft: WasteReceiverDraf
 }
 
 export async function saveRedistribution(userId: string, draft: FoodRedistributionDraft) {
-  if (draft.safetyCheck !== 'compliant') throw new Error('Un produs neconform nu poate fi redistribuit. Înregistrează-l în Registrul de risipă.');
+  if (draft.safetyCheck !== 'compliant') throw new OperationalError('waste.blockedValidation');
   const now = new Date().toISOString(); let item: FoodRedistribution = { ...draft, quantityKg: quantityInKg(draft.quantity, draft.unit, draft.quantityKg), id: draft.id ?? uuid(), createdAt: now, updatedAt: now, syncState: canSync(userId) ? 'pending' : 'local' };
   const data = await read(userId); data.transfers = [item, ...data.transfers.filter((x) => x.id !== item.id)]; await write(userId, data);
   if (!canSync(userId) || !supabase) return item;

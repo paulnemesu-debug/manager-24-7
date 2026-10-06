@@ -16,6 +16,7 @@ import type {
   Recipe,
 } from '@/types/recipe';
 import { resolveAutomaticNutrition } from '@/lib/nutrition-auto';
+import { normalizeSourceReview } from '@/lib/recipe-source-review';
 
 export const DECLARED_NUTRIENT_KEYS = [
   'energyKj',
@@ -179,7 +180,7 @@ export function normalizeRecipeCompliance(value: unknown): RecipeComplianceDraft
     isDefrosted: input.isDefrosted === true,
     nutritionNotes: text('nutritionNotes'),
     templateId: text('templateId'),
-    sourceReference: text('sourceReference'),
+    ...normalizeSourceReview(input, text('sourceReference'), text('templateId')),
   };
 }
 

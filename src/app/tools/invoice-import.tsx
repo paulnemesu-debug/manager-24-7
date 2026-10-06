@@ -9,8 +9,8 @@ import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { readDocumentText } from '@/lib/document-bytes';
-import { useRouter } from 'expo-router';
-import { useMemo, useRef, useState } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ToolHeader } from '@/components/tool-header';
@@ -32,6 +32,7 @@ import {
   type ScannedInvoice,
 } from '@/lib/invoice-import';
 import { loadInvoiceProductMappings, rememberInvoiceProductMappings } from '@/lib/invoice-mappings';
+import { takeInvoiceImport } from '@/lib/invoice-import-handoff';
 import { scanInvoiceDocument } from '@/lib/invoice-scan';
 import { loadSales } from '@/lib/operations-storage';
 import { recordPriceAlert } from '@/lib/price-alert-history';
@@ -43,11 +44,12 @@ const priceKey = (kind: 'match' | 'new', rowNumber: number) => `${kind}-${rowNum
 
 export default function InvoiceImportScreen() {
   const router = useRouter();
+  const { handoff } = useLocalSearchParams<{ handoff?: string }>();
   const auth = useAuth();
   const { t, locale } = useI18n();
   const { format } = usePreferences();
   const { isViewer } = useSubscription();
-  const { catalog, recipes, applyPriceUpdates, importNewCatalogItems } = useWorkspace();
+  const { catalog, recipes, isLoading, applyPriceUpdates, importNewCatalogItems } = useWorkspace();
   const userId = auth.user?.id ?? 'demo';
   const [invoice, setInvoice] = useState<ScannedInvoice | null>(null);
   const [preview, setPreview] = useState<InvoiceImportPreview | null>(null);
@@ -67,6 +69,33 @@ export default function InvoiceImportScreen() {
     invoice?.rows.filter((row) => row.confidence < 0.65).length ?? 0
   ), [invoice]);
 
+  const showPreview = useCallback((scanned: ScannedInvoice, name: string, knownMappings: InvoiceProductMapping[] = []) => {
+    const next = buildInvoiceImportPreview(scanned, catalog, knownMappings);
+    setInvoice(scanned);
+    setMappings(knownMappings); setManualTargets({});
+    setPreview(next);
+    setSourceName(name);
+    const nextPrices: Record<string, string> = {};
+    next.matches.forEach((match) => {
+      nextPrices[priceKey('match', match.row.rowNumber)] = String(match.newPrice);
+    });
+    next.newItems.forEach((row) => {
+      nextPrices[priceKey('new', row.rowNumber)] = String(row.unitPrice);
+    });
+    setPrices(nextPrices);
+    // Parsing confidence never substitutes for catalog selection and operator review.
+    setSelected(new Set());
+    setReviewed(false);
+  }, [catalog]);
+
+  useEffect(() => {
+    if (isLoading || typeof handoff !== 'string') return;
+    const incoming = takeInvoiceImport(handoff, userId);
+    if (!incoming || isViewer) return;
+    // The validated local document needs neither OCR nor a remote mapping lookup.
+    showPreview(incoming.invoice, incoming.sourceName);
+  }, [handoff, isLoading, isViewer, showPreview, userId]);
+
   const prepare = async (uri: string, mediaType: string | null | undefined, name: string) => {
     if (isViewer || busy) return;
     setBusy(true);
@@ -75,28 +104,11 @@ export default function InvoiceImportScreen() {
       const isXml = /xml/i.test(mediaType ?? '') || /\.xml$/i.test(name);
       const [scanned, mappings] = await Promise.all([
         isXml
-          ? readDocumentText(uri).then(parseEfacturaXml).then(efacturaToScannedInvoice)
+          ? readDocumentText(uri).then((text) => parseEfacturaXml(text, locale)).then(efacturaToScannedInvoice)
           : scanInvoiceDocument(uri, mediaType),
         loadInvoiceProductMappings(userId),
       ]);
-      const next = buildInvoiceImportPreview(scanned, catalog, mappings);
-      setInvoice(scanned);
-      setMappings(mappings); setManualTargets({});
-      setPreview(next);
-      setSourceName(name);
-      const defaults = new Set<string>();
-      const nextPrices: Record<string, string> = {};
-      next.matches.forEach((match) => {
-        const key = priceKey('match', match.row.rowNumber);
-        nextPrices[key] = String(match.newPrice);
-        // OCR confidence says nothing about whether the catalog match is right.
-      });
-      next.newItems.forEach((row) => {
-        const key = priceKey('new', row.rowNumber);
-        nextPrices[key] = String(row.unitPrice);
-      });
-      setPrices(nextPrices);
-      setSelected(defaults);
+      showPreview(scanned, name, mappings);
     } catch (caught) {
       const message = caught instanceof Error && caught.message === 'invoice_too_large'
         ? t('invoice.tooLarge') : scanErrorMessage(caught, locale, t('invoice.scanFailedBody'));

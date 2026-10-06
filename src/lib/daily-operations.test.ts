@@ -14,6 +14,15 @@ import { dailyAttendance, loadDailyOperations } from './daily-operations';
 import { inspectionReadiness, readinessScore } from './control-mode';
 beforeEach(() => { fixtures.hr = { employees: [], shifts: [] }; fixtures.documents = []; fixtures.lifecycle = []; fixtures.haccp = []; fixtures.equipment = []; fixtures.operations = { orders: [], waste: [], schedules: [] }; });
 describe('Daily Operations integration', () => {
+  it('provides inspection evidence from the loaded snapshot and excludes archived or deleted records', async () => {
+    fixtures.documents = [{ id: 'current', title: 'Autorizație', category: 'authorization', expiryDate: '2026-10-03', issueDate: '', owner: '', notes: '' }, { id: 'archived', expiryDate: '', archived: true }];
+    fixtures.haccp = [{ id: 'removed', formCode: 'FO-H-04-01', headerValues: {}, rows: [], deletedAt: '2026-10-01' }];
+    const result = await loadDailyOperations('demo', [], 'en', 'QA', new Date('2026-10-05T12:00:00'));
+    expect(result.inspection.documents).toHaveLength(1);
+    expect(result.inspection.documents[0]).toMatchObject({ title: 'Autorizație', expiryLabel: 'Expired', expiryAttention: true });
+    expect(result.inspection.haccpDocuments).toEqual([]);
+    expect(result.inspection.date).toBe('2026-10-05');
+  });
   it('counts only confirmed attendance of active staff on the local date', () => {
     fixtures.hr = { employees: [{ id: 'a', active: true }, { id: 'b', active: true }, { id: 'left', active: false }], shifts: [
       { employeeId: 'a', workDate: '2026-10-04', status: 'scheduled' },

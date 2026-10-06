@@ -30,7 +30,7 @@ Dublu-click pe `BUILD-APK-LOCAL-WINDOWS.bat`. Scriptul detectează Java și SDK-
 instalează componentele lipsă când `sdkmanager` este disponibil, rulează toate
 verificările și generează în rădăcina proiectului:
 
-`manager24-7-v1.6.1-local.apk`
+`manager24-7-v1.6.2-local.apk`
 
 Durata primei compilări depinde de calculator și de descărcarea componentelor
 Android. Scriptul păstrează cache-ul și reutilizează componentele deja compilate.
@@ -58,7 +58,7 @@ deoarece semnătura este diferită. În acest caz:
 
 1. salvează orice date locale nesincronizate;
 2. dezinstalează versiunea existentă `Manager 24/7`;
-3. instalează `manager24-7-v1.6.1-local.apk`.
+3. instalează `manager24-7-v1.6.2-local.apk`.
 
 Scriptul nu dezinstalează niciodată automat aplicația.
 

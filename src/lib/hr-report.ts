@@ -1,3 +1,5 @@
+import type { Locale } from '@/i18n/translations';
+import { workforceTranslator } from '@/i18n/workforce-translations';
 import { PARADIM_LOGO_DATA_URI } from '@/constants/brand-logo';
 import { COMPANY_CONTACT_LINE } from '@/constants/paradim';
 import { totalMonthlyGrossSalary } from '@/lib/hr';
@@ -52,9 +54,9 @@ export function hrPeriodParts(period: string) {
   return { year, month, days: new Date(year, month, 0).getDate() };
 }
 
-export function hrPeriodLabel(period: string) {
+export function hrPeriodLabel(period: string, locale: Locale = 'ro') {
   const { year, month } = hrPeriodParts(period);
-  return new Intl.DateTimeFormat('ro-RO', { month: 'long', year: 'numeric' })
+  return new Intl.DateTimeFormat(locale === 'ro' ? 'ro-RO' : 'en-GB', { month: 'long', year: 'numeric' })
     .format(new Date(year, month - 1, 1));
 }
 
@@ -63,9 +65,9 @@ export function hrDateForDay(period: string, day: number) {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
-export function hrWeekdayLabel(period: string, day: number) {
+export function hrWeekdayLabel(period: string, day: number, locale: Locale = 'ro') {
   const { year, month } = hrPeriodParts(period);
-  const label = new Intl.DateTimeFormat('ro-RO', { weekday: 'short' })
+  const label = new Intl.DateTimeFormat(locale === 'ro' ? 'ro-RO' : 'en-GB', { weekday: 'short' })
     .format(new Date(year, month - 1, day));
   return label.replace('.', '').slice(0, 2).toUpperCase();
 }
@@ -129,8 +131,8 @@ export function buildHrMonthlyRows(
     });
 }
 
-export function hrGeneratedAtLabel(date: Date) {
-  return new Intl.DateTimeFormat('ro-RO', {
+export function hrGeneratedAtLabel(date: Date, locale: Locale = 'ro') {
+  return new Intl.DateTimeFormat(locale === 'ro' ? 'ro-RO' : 'en-GB', {
     year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
   }).format(date);
 }
@@ -149,7 +151,10 @@ export function buildHrPdfHtml(
   period: string,
   locationName = 'Toate locațiile',
   generatedAt = new Date(),
+  locale: Locale = 'ro',
 ) {
+  const tr = workforceTranslator(locale);
+  const selectedLocation = locationName === 'Toate locațiile' ? tr('Toate locațiile') : locationName;
   const { days } = hrPeriodParts(period);
   const rows = buildHrMonthlyRows(employees, shifts, period);
   const detailRows = buildHrRows(employees, shifts.filter((shift) => shift.workDate.startsWith(`${period}-`)));
@@ -160,17 +165,17 @@ export function buildHrPdfHtml(
   const fileName = hrReportFileName(period, 'pdf', generatedAt);
   const dayHeaders = Array.from({ length: days }, (_, index) => {
     const day = index + 1;
-    return `<th class="day ${hrDayIsWeekend(period, day) ? 'weekend' : ''}"><b>${day}</b><small>${hrWeekdayLabel(period, day)}</small></th>`;
+    return `<th class="day ${hrDayIsWeekend(period, day) ? 'weekend' : ''}"><b>${day}</b><small>${hrWeekdayLabel(period, day, locale)}</small></th>`;
   }).join('');
   const body = rows.map((row) => {
     const dayCells = Array.from({ length: days }, (_, index) => {
       const shift = row.shiftsByDay.get(index + 1);
       return `<td class="day ${dayCellClass(shift)}">${escapeHtml(hrDayCellValue(shift))}</td>`;
     }).join('');
-    return `<tr><td class="employee"><strong>${escapeHtml(row.employee.name)}</strong><small>${escapeHtml(row.employee.locationName || 'Fără locație')}</small></td><td class="role">${escapeHtml(row.employee.role || '—')}</td>${dayCells}<td class="total">${row.totalHours.toFixed(1)}</td><td class="total">${row.presentDays}</td><td class="total">${row.absentDays}</td><td class="total">${row.leaveDays}</td><td class="total">${row.dayOffDays}</td></tr>`;
+    return `<tr><td class="employee"><strong>${escapeHtml(row.employee.name)}</strong><small>${escapeHtml(row.employee.locationName || tr('Fără locație'))}</small></td><td class="role">${escapeHtml(row.employee.role || '—')}</td>${dayCells}<td class="total">${row.totalHours.toFixed(1)}</td><td class="total">${row.presentDays}</td><td class="total">${row.absentDays}</td><td class="total">${row.leaveDays}</td><td class="total">${row.dayOffDays}</td></tr>`;
   }).join('');
 
-  return `<!doctype html><html lang="ro"><head><meta charset="utf-8"><title>${fileName}</title><style>
+  return `<!doctype html><html lang="${locale}"><head><meta charset="utf-8"><title>${fileName}</title><style>
     @page{size:A4 landscape;margin:8mm 7mm 10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#17212B;margin:0}
     .brand{display:flex;align-items:center;gap:10px;border-bottom:2px solid #D8AA37;padding-bottom:6px;margin-bottom:7px}.brand img{width:48px;height:48px;object-fit:contain}
     .brand-copy{flex:1}.brand-name{font-size:15px;font-weight:800;color:#062544}.brand-details{font-size:7px;line-height:1.45;color:#52626F;margin-top:2px}.report-meta{text-align:right;font-size:7px;line-height:1.45;color:#52626F}
@@ -181,11 +186,11 @@ export function buildHrPdfHtml(
     .status-present{background:#E2F4EA;color:#126845}.status-absent{background:#FDE6E6;color:#A12E37}.status-leave{background:#E8F0FB;color:#235B9E}.status-day_off{background:#ECEFF1;color:#52626F}.status-scheduled{background:#FFF2CC;color:#7D5A00}
     .legend{font-size:6px;color:#52626F;margin-top:6px}.footer{margin-top:6px;padding-top:5px;border-top:1px solid #DDE4E8;color:#667482;font-size:6px;display:flex;justify-content:space-between}
   </style></head><body>
-    <header class="brand"><img src="${PARADIM_LOGO_DATA_URI}" alt="Sigla oficială PARADIM"><div class="brand-copy"><div class="brand-name">MANAGER 24/7 by PARADIM</div><div class="brand-details">PARADIM Operations SRL · Iași, România<br>${escapeHtml(COMPANY_CONTACT_LINE)}</div></div><div class="report-meta"><strong>Nume raport:</strong> Pontaj lunar<br><strong>Data generării:</strong> ${escapeHtml(hrGeneratedAtLabel(generatedAt))}<br><strong>Perioada:</strong> ${escapeHtml(period)}</div></header>
-    <h1>PONTAJ LUNAR</h1><p class="subtitle">${escapeHtml(hrPeriodLabel(period))} · ${escapeHtml(locationName)}</p>
-    <section class="summary"><div class="metric"><div class="metric-label">Angajați</div><div class="metric-value">${rows.length}</div></div><div class="metric"><div class="metric-label">Înregistrări</div><div class="metric-value">${detailRows.length}</div></div><div class="metric"><div class="metric-label">Ore lucrate</div><div class="metric-value">${totalHours.toFixed(1)}</div></div><div class="metric"><div class="metric-label">Salarii brute</div><div class="metric-value">${totalGross.toFixed(2)} lei</div></div><div class="metric"><div class="metric-label">Salarii nete</div><div class="metric-value">${totalNet.toFixed(2)} lei</div></div></section>
-    <table><thead><tr><th class="name">Angajat</th><th class="role">Funcție</th>${dayHeaders}<th class="summary">Ore</th><th class="summary">P</th><th class="summary">A</th><th class="summary">CO</th><th class="summary">L</th></tr></thead><tbody>${body || `<tr><td colspan="${days + 7}">Nu există angajați în filtrul selectat.</td></tr>`}</tbody></table>
-    <div class="legend"><strong>Legendă:</strong> număr = ore lucrate · PR = programat · A = absent · CO = concediu · L = liber. Fiecare angajat are o singură fișă lunară, iar fiecare zi o singură înregistrare.</div>
-    <footer class="footer"><span>Document generat de Manager 24/7</span><span>PARADIM Operations SRL · ${escapeHtml(fileName)}</span></footer>
+    <header class="brand"><img src="${PARADIM_LOGO_DATA_URI}" alt="${tr("Sigla oficială PARADIM")}"><div class="brand-copy"><div class="brand-name">MANAGER 24/7 by PARADIM</div><div class="brand-details">PARADIM Operations SRL · Iași, România<br>${escapeHtml(COMPANY_CONTACT_LINE)}</div></div><div class="report-meta"><strong>${tr("Nume raport:")}</strong> ${tr("Pontaj lunar")}<br><strong>${tr("Data generării:")}</strong> ${escapeHtml(hrGeneratedAtLabel(generatedAt, locale))}<br><strong>${locale === "ro" ? "Perioada:" : "Period:"}</strong> ${escapeHtml(period)}</div></header>
+    <h1>${tr("PONTAJ LUNAR")}</h1><p class="subtitle">${escapeHtml(hrPeriodLabel(period, locale))} · ${escapeHtml(selectedLocation)}</p>
+    <section class="summary"><div class="metric"><div class="metric-label">${tr("Angajați")}</div><div class="metric-value">${rows.length}</div></div><div class="metric"><div class="metric-label">${tr("Înregistrări")}</div><div class="metric-value">${detailRows.length}</div></div><div class="metric"><div class="metric-label">${tr("Ore lucrate")}</div><div class="metric-value">${totalHours.toFixed(1)}</div></div><div class="metric"><div class="metric-label">${tr("Salarii brute")}</div><div class="metric-value">${totalGross.toFixed(2)} RON</div></div><div class="metric"><div class="metric-label">${tr("Salarii nete")}</div><div class="metric-value">${totalNet.toFixed(2)} RON</div></div></section>
+    <table><thead><tr><th class="name">${tr("Angajat")}</th><th class="role">${tr("Funcție")}</th>${dayHeaders}<th class="summary">${tr("Ore")}</th><th class="summary">P</th><th class="summary">A</th><th class="summary">CO</th><th class="summary">L</th></tr></thead><tbody>${body || `<tr><td colspan="${days + 7}">${tr("Nu există angajați în filtrul selectat.")}</td></tr>`}</tbody></table>
+    <div class="legend"><strong>${tr("Legendă:")}</strong> ${tr("număr = ore lucrate · PR = programat · A = absent · CO = concediu · L = liber. Fiecare angajat are o singură fișă lunară, iar fiecare zi o singură înregistrare.")}</div>
+    <footer class="footer"><span>${tr("Document generat de Manager 24/7")}</span><span>PARADIM Operations SRL · ${escapeHtml(fileName)}</span></footer>
   </body></html>`;
 }

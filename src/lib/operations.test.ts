@@ -130,4 +130,13 @@ describe('operational tools', () => {
     expect(message).toContain('• Făină: 3 kg');
     expect(message).toContain('Total estimat: 30,00 RON');
   });
+
+  it('localizes displayed piece units without rewriting shopping-list data', () => {
+    const line = Object.freeze({ key: 'eggs', name: 'Ouă', quantity: 20, unit: 'buc' as const, supplier: 'Furnizor local', cost: 30 });
+    const input = { title: 'Shopping list', lines: [line], totalLabel: 'Total', totalValue: '30 RON' };
+    expect(buildShoppingListMessage({ ...input, locale: 'en' })).toContain('• Ouă: 20 pcs');
+    expect(buildShoppingListMessage({ ...input, locale: 'ro' })).toContain('• Ouă: 20 buc');
+    expect(line.unit).toBe('buc');
+    expect(line.name).toBe('Ouă');
+  });
 });

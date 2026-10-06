@@ -1,3 +1,4 @@
+import { translate, type Locale, type TranslationKey } from '@/i18n/translations';
 /**
  * MANAGER 24/7™ by PARADIM — proprietary software.
  * Copyright © 2026 PARADIM Operations SRL. All rights reserved.
@@ -95,7 +96,8 @@ export function unitCodeToPriceUnit(code: string | null): PriceUnit | null {
   return null;
 }
 
-export function parseEfacturaXml(xml: string): EFacturaDocument {
+export function parseEfacturaXml(xml: string, locale: Locale = 'ro'): EFacturaDocument {
+  const t = (key: TranslationKey, params?: Record<string, string | number>) => translate(locale, key, params);
   if (xml.length > 10_000_000) throw new Error('efactura_too_large');
   if (/<!DOCTYPE|<!ENTITY/i.test(xml)) throw new Error('efactura_unsafe_xml');
   const root = /<(?:[A-Za-z_][\w.-]*:)?(Invoice|CreditNote)\b/i.exec(xml)?.[1]?.toLowerCase();
@@ -113,7 +115,7 @@ export function parseEfacturaXml(xml: string): EFacturaDocument {
     const taxCategory = tagBlock(block, 'ClassifiedTaxCategory') ?? tagBlock(block, 'TaxCategory');
     return {
       id: tagText(block, 'ID') ?? String(index + 1),
-      name: tagText(item, 'Name') ?? tagText(item, 'Description') ?? `Linia ${index + 1}`,
+      name: tagText(item, 'Name') ?? tagText(item, 'Description') ?? t('operational.efactura.line', { number: index + 1 }),
       quantity,
       unitCode,
       unit: unitCodeToPriceUnit(unitCode),
@@ -140,17 +142,17 @@ export function parseEfacturaXml(xml: string): EFacturaDocument {
     errors: [],
     warnings: [],
   };
-  if (!document.invoiceNumber) document.errors.push('Lipsește numărul documentului (ID).');
-  if (!document.issueDate || !/^\d{4}-\d{2}-\d{2}$/.test(document.issueDate)) document.errors.push('Data emiterii lipsește sau nu este ISO YYYY-MM-DD.');
-  if (!document.supplierName || !document.supplierTaxId) document.errors.push('Identitatea fiscală a furnizorului este incompletă.');
-  if (!document.customerName || !document.customerTaxId) document.errors.push('Identitatea fiscală a cumpărătorului este incompletă.');
-  if (!document.currency) document.errors.push('Lipsește moneda documentului.');
-  if (!document.lines.length) document.errors.push('Documentul nu conține linii de factură.');
-  if (document.payableAmount === null) document.errors.push('Lipsește totalul de plată.');
-  if (!document.customizationId) document.warnings.push('Lipsește CustomizationID; profilul RO_CIUS nu poate fi confirmat local.');
-  if (!document.profileId) document.warnings.push('Lipsește ProfileID.');
+  if (!document.invoiceNumber) document.errors.push(t('operational.efactura.noNumber'));
+  if (!document.issueDate || !/^\d{4}-\d{2}-\d{2}$/.test(document.issueDate)) document.errors.push(t('operational.efactura.noDate'));
+  if (!document.supplierName || !document.supplierTaxId) document.errors.push(t('operational.efactura.noSupplier'));
+  if (!document.customerName || !document.customerTaxId) document.errors.push(t('operational.efactura.noCustomer'));
+  if (!document.currency) document.errors.push(t('operational.efactura.noCurrency'));
+  if (!document.lines.length) document.errors.push(t('operational.efactura.noLines'));
+  if (document.payableAmount === null) document.errors.push(t('operational.efactura.noTotal'));
+  if (!document.customizationId) document.warnings.push(t('operational.efactura.noCustomization'));
+  if (!document.profileId) document.warnings.push(t('operational.efactura.noProfile'));
   const unknownUnits = document.lines.filter((line) => !line.unit).length;
-  if (unknownUnits) document.warnings.push(`${unknownUnits} linii au unități care necesită mapare manuală.`);
+  if (unknownUnits) document.warnings.push(t('operational.efactura.unknownUnits', { count: unknownUnits }));
   return document;
 }
 

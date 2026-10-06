@@ -1,12 +1,13 @@
 import type { Locale } from '@/i18n/translations';
 import { buildDailyManager, dailyScore } from '@/lib/ai-daily-manager';
 import { loadHrData } from '@/lib/hr-repository';
-import { defaultHrLifecycle, hrLifecycleProgress, loadHrLifecycle } from '@/lib/hr-lifecycle';
+import { defaultHrLifecycle, getHrLifecycleChecks, getHrLifecycleLabels, hrLifecycleProgress, loadHrLifecycle } from '@/lib/hr-lifecycle';
 import { syncHaccpDocuments } from '@/lib/haccp-repository';
 import { listHaccpEquipment, loadHaccpProfile } from '@/lib/haccp-routine-repository';
 import { buildHaccpTodayTasks } from '@/lib/haccp-today';
 import { localIsoDate } from '@/lib/local-date-time';
-import { loadOperationalDocuments, documentExpiryStatus } from '@/lib/operational-documents';
+import { loadOperationalDocuments, documentExpiryStatus, getDocumentCategories } from '@/lib/operational-documents';
+import type { ControlReportData } from '@/lib/control-report';
 import { loadOperationsControlData } from '@/lib/operations-control-repository';
 import { calculatePnl, currentPnlPeriod } from '@/lib/pnl';
 import { syncPnlReports } from '@/lib/pnl-repository';
@@ -28,9 +29,10 @@ export async function loadDailyOperations(userId: string, recipes: Recipe[], loc
   ]);
   const lifecycle = await loadHrLifecycle(userId);
   const today = localIsoDate(now);
-  const tasks = buildHaccpTodayTasks(haccp.documents, equipment, locale, now, profile).filter((task) => task.required);
+  const recordedHaccp = haccp.documents.filter((doc) => !doc.deletedAt);
+  const tasks = buildHaccpTodayTasks(recordedHaccp, equipment, locale, now, profile).filter((task) => task.required);
   const documents = docs.filter((doc) => !doc.archived);
-  const expiry = documents.map((doc) => documentExpiryStatus(doc.expiryDate, now));
+  const expiry = documents.map((doc) => documentExpiryStatus(doc.expiryDate, now, locale));
   const currentPnl = reports.find((report) => report.period === currentPnlPeriod(now));
   const pendingLifecycle = hr.employees.filter((employee) => {
     const item = lifecycle.find((entry) => entry.employeeId === employee.id) ?? defaultHrLifecycle(employee);
@@ -48,8 +50,25 @@ export async function loadDailyOperations(userId: string, recipes: Recipe[], loc
     pendingOrders: operations.orders.filter((item) => item.orderDate <= today && !['received', 'cancelled'].includes(item.status)).length,
     todayWasteValue: operations.waste.filter((item) => item.eventDate === today).reduce((sum, item) => sum + item.value, 0),
   };
-  const signals = buildDailyManager(input);
+  const signals = buildDailyManager(input, locale);
   const pendingSync = [...docs, ...lifecycle].filter((item) => item.syncState === 'pending' || item.syncState === 'conflict').length;
-  return { input, signals, score: dailyScore(signals), pendingSync: pendingSync + haccp.pending, documentCount: documents.length, haccpDocuments: haccp.documents.filter((doc) => doc.rows.length > 0).length, updatedAt: now.toISOString() };
+  const haccpDocumentCount = recordedHaccp.filter((doc) => doc.rows.length > 0).length;
+  const categories = getDocumentCategories(locale);
+  const lifecycleLabels = getHrLifecycleLabels(locale);
+  const inspection: ControlReportData = {
+    date: today, updatedAt: now.toISOString(), location: profile.defaultLocationName, pendingSync: pendingSync + haccp.pending,
+    input: { ...input, documentCount: documents.length, haccpDocuments: haccpDocumentCount, haccpPending: input.haccpExpected - input.haccpToday },
+    documents: documents.map((doc, index) => ({ ...doc, categoryLabel: categories.find((category) => category.value === doc.category)?.label ?? doc.category,
+      expiryLabel: expiry[index].label, expiryAttention: expiry[index].tone === 'danger' || expiry[index].tone === 'watch' })),
+    haccpDocuments: recordedHaccp, haccpTasks: tasks,
+    employees: hr.employees.map((employee) => {
+      const item = lifecycle.find((entry) => entry.employeeId === employee.id) ?? defaultHrLifecycle(employee);
+      return { name: employee.name, role: employee.role, location: employee.locationName, active: employee.active,
+        attendance: [...new Set(hr.shifts.filter((shift) => shift.employeeId === employee.id && shift.workDate === today).map((shift) => shift.status))],
+        lifecycleStatus: lifecycleLabels[item.status], ...hrLifecycleProgress(item),
+        pendingChecks: getHrLifecycleChecks(item.status, locale).filter((check) => !item[check.key]).map((check) => check.label), notes: item.notes };
+    }),
+  };
+  return { input, signals, score: dailyScore(signals), pendingSync: pendingSync + haccp.pending, documentCount: documents.length, haccpDocuments: haccpDocumentCount, updatedAt: now.toISOString(), inspection };
 }
 export type DailyOperations = Awaited<ReturnType<typeof loadDailyOperations>>;

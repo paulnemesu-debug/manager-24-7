@@ -63,6 +63,8 @@ import {
   resolveRecipeAllergens,
 } from '@/lib/calculations';
 import { clearRecipeDraft, loadRecipeDrafts, saveRecipeDraft } from '@/lib/recipe-drafts';
+import { displayUnit } from '@/lib/display-unit';
+import { canReviewSourceRecipe, requiresSourceReview, updateSourceRecipeIngredients } from '@/lib/recipe-source-review';
 import { isOfflineId, workspaceErrorMessage } from '@/lib/offline-workspace';
 import { exportRecipeExcel, exportRecipePdf } from '@/lib/recipe-export';
 import { pricesUpdatedAt, recipesUsingSubRecipe } from '@/lib/recipe-graph';
@@ -227,6 +229,12 @@ export function RecipeEditor({
   );
   const nutrition = useMemo(() => calculateRecipeNutrition(draft), [draft]);
   const compliance = useMemo(() => normalizeRecipeCompliance(draft.compliance), [draft.compliance]);
+  const sourceReviewPending = requiresSourceReview(draft);
+  const sourceReviewTitle = locale === 'ro' ? 'Verifică rețeta importată' : 'Review the imported recipe';
+  const sourceReviewBody = locale === 'ro'
+    ? 'Completează o cantitate și un preț de achiziție pozitive pentru fiecare ingredient. Verifică lista completă și unitățile în sursa originală, apoi confirmă mai jos. Valorile nutriționale ale sursei rămân neverificate.'
+    : 'Enter a positive quantity and purchase price for every ingredient. Check the complete list and units against the original source, then confirm below. Source nutrition values remain unverified.';
+  const reviewedMoney = (value: number | null) => sourceReviewPending ? '—' : format.money(value);
   const additives = useMemo(() => aggregateRecipeAdditives(draft), [draft]);
 
   /** Semipreparatele care nu ar crea o buclă dacă sunt adăugate în rețeta curentă. */
@@ -246,7 +254,7 @@ export function RecipeEditor({
   }));
   const yieldUnitOptions: SelectOption<PriceUnit>[] = priceUnits.map((unit) => ({
     value: unit,
-    label: unit,
+    label: displayUnit(unit, locale),
   }));
   const allergenOptions: SelectOption<Allergen>[] = ALLERGENS.map((allergen) => ({
     value: allergen,
@@ -283,19 +291,18 @@ export function RecipeEditor({
 
   const updateIngredient = (id: string, change: Partial<IngredientDraft>) => {
     if (isSaving) return;
-    setDraft((current) => ({
-      ...current,
-      ingredients: current.ingredients.map((ingredient) => (
+    setDraft((current) => updateSourceRecipeIngredients(current,
+      current.ingredients.map((ingredient) => (
         ingredient.id === id ? enrichIngredientNutrition({ ...ingredient, ...change }) : ingredient
       )),
-    }));
+    ));
   };
 
   const addIngredient = (ingredient: IngredientDraft) => {
     if (isSaving) return;
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
-    setDraft((current) => ({ ...current, ingredients: [...current.ingredients, enrichIngredientNutrition(ingredient)] }));
+    setDraft((current) => updateSourceRecipeIngredients(current, [...current.ingredients, enrichIngredientNutrition(ingredient)]));
   };
 
   const addFromCatalog = (catalogId: string | null) => {
@@ -326,10 +333,7 @@ export function RecipeEditor({
   const removeIngredient = (id: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
-    setDraft((current) => ({
-      ...current,
-      ingredients: current.ingredients.filter((ingredient) => ingredient.id !== id),
-    }));
+    setDraft((current) => updateSourceRecipeIngredients(current, current.ingredients.filter((ingredient) => ingredient.id !== id)));
   };
 
   const applyPickedPhoto = async (picked: ImagePicker.ImagePickerResult) => {
@@ -387,6 +391,7 @@ export function RecipeEditor({
 
   const submit = async () => {
     if (isSaving || photoBusy) return;
+    if (sourceReviewPending) { Alert.alert(sourceReviewTitle, sourceReviewBody); return; }
     if (!draft.title.trim()) {
       setActiveTab('ingredients');
       Alert.alert(t('editor.missingTitleTitle'), t('editor.missingTitleBody'));
@@ -402,13 +407,13 @@ export function RecipeEditor({
     ));
     if (invalidGramIngredient) {
       setActiveTab('ingredients');
-      Alert.alert('Gramaj invalid', `Completează un gramaj mai mare decât zero pentru „${invalidGramIngredient.name}”.`);
+      Alert.alert(t('operational.shared.gramError'), t('operational.shared.gramBody', { name: invalidGramIngredient.name }));
       return;
     }
     if (draft.compliance?.finalWeightGrams !== null && draft.compliance?.finalWeightGrams !== undefined
       && (!Number.isFinite(draft.compliance.finalWeightGrams) || draft.compliance.finalWeightGrams <= 0)) {
       setActiveTab('nutrition');
-      Alert.alert('Greutate finală invalidă', 'Greutatea finală trebuie să fie mai mare decât zero.');
+      Alert.alert(t('operational.shared.weightError'), t('operational.shared.weightPositive'));
       return;
     }
 
@@ -438,6 +443,7 @@ export function RecipeEditor({
   };
 
   const duplicate = async () => {
+    if (sourceReviewPending) { Alert.alert(sourceReviewTitle, sourceReviewBody); return; }
     setIsSaving(true);
     try {
       const copy = await saveRecipe({
@@ -479,6 +485,7 @@ export function RecipeEditor({
 
   const exportSheet = async (kind: 'pdf' | 'excel') => {
     if (!recipe) return;
+    if (sourceReviewPending || requiresSourceReview(recipe)) { Alert.alert(sourceReviewTitle, sourceReviewBody); return; }
     setIsExporting(true);
     try {
       const context = {
@@ -554,14 +561,14 @@ export function RecipeEditor({
           <View style={styles.stickyMetric}>
             <Text style={styles.stickyLabel}>{t('editor.recommendedLabel')}</Text>
             <Text style={styles.stickyValue} numberOfLines={1} adjustsFontSizeToFit>
-              {format.money(totals.recommendedPriceGross)}
+              {reviewedMoney(totals.recommendedPriceGross)}
             </Text>
           </View>
           <AppButton
             label={compactEditor ? t('common.save') : recipe ? t('editor.saveEdit') : t('editor.saveNew')}
             icon="checkmark"
             loading={isSaving}
-            disabled={subscription.isViewer || !draftReady || Boolean(photoBusy) || hasDraftConflict}
+            disabled={subscription.isViewer || !draftReady || Boolean(photoBusy) || hasDraftConflict || sourceReviewPending}
             onPress={() => void submit()}
           />
         </View>
@@ -577,6 +584,16 @@ export function RecipeEditor({
           <View style={styles.topSpacer} />
         )}
       </View>
+
+      {compliance.sourceReviewRequired !== undefined && <Card tone="gold">
+        <SectionHeader title={sourceReviewTitle} /><Body>{sourceReviewBody}</Body>
+        <View style={styles.switchRow}><View style={styles.switchCopy}>
+          <Text style={styles.switchLabel}>{locale === 'ro' ? 'Am verificat ingredientele, cantitățile, unitățile și prețurile' : 'I reviewed the ingredients, quantities, units and prices'}</Text>
+        </View><Switch accessibilityLabel={locale === 'ro' ? 'Confirmă datele rețetei importate' : 'Confirm imported recipe data'}
+          value={!sourceReviewPending} disabled={sourceReviewPending && !canReviewSourceRecipe(draft)}
+          onValueChange={(confirmed) => setCompliance('sourceReviewRequired', !confirmed)}
+          trackColor={{ true: Brand.gold, false: Brand.line }} /></View>
+      </Card>}
 
       {hasDraftConflict && recipe && !subscription.isViewer && (
         <Card tone="gold">
@@ -773,7 +790,7 @@ export function RecipeEditor({
             style={styles.rowField}
             label={t('editor.fieldSalePrice')}
             hint={t('editor.recommendedInline', {
-              price: format.money(totals.recommendedPriceGross),
+              price: reviewedMoney(totals.recommendedPriceGross),
             })}
             keyboardType="decimal-pad"
             value={String(draft.salePriceGross)}
@@ -784,6 +801,7 @@ export function RecipeEditor({
           label={t('editor.useRecommended')}
           icon="pricetag-outline"
           variant="secondary"
+          disabled={sourceReviewPending}
           onPress={() => setField('salePriceGross', totals.recommendedPriceGross)}
         />
         <ChoiceRow
@@ -954,7 +972,7 @@ export function RecipeEditor({
         <Body>{t('nutrition.legalNotice')}</Body>
       </Card>}
 
-      {(!compactEditor || activeTab === 'cost') && <Card tone="navy">
+      {!sourceReviewPending && (!compactEditor || activeTab === 'cost') && <Card tone="navy">
         <SectionHeader eyebrow={t('editor.resultEyebrow')} title={t('editor.resultTitle')} light />
         <View style={styles.resultGrid}>
           <BigNumber

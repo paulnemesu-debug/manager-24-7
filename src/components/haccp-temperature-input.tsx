@@ -11,6 +11,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { RollerPickerModal, type RollerPickerColumn } from '@/components/roller-picker-modal';
 import { Brand, Fonts, Radius, TabularNumbers } from '@/constants/theme';
+import { useI18n } from '@/contexts/locale-context';
 
 function numeric(value: string) {
   const parsed = Number(value.replace(',', '.').replace(/[^0-9.-]/g, ''));
@@ -19,6 +20,10 @@ function numeric(value: string) {
 
 function formatted(value: number) {
   return String(Math.round(value * 10) / 10).replace('.', ',');
+}
+
+function displayTemperature(value: string, locale: 'ro' | 'en') {
+  return locale === 'en' ? value.replace(',', '.') : value.replace('.', ',');
 }
 
 export function HaccpTemperatureInput({
@@ -42,6 +47,7 @@ export function HaccpTemperatureInput({
   maximum?: number;
   large?: boolean;
 }) {
+  const { locale, t } = useI18n();
   const [open, setOpen] = useState(false);
   const parsed = numeric(value);
   const nonconform = parsed !== null && (
@@ -53,15 +59,15 @@ export function HaccpTemperatureInput({
     const count = Math.max(1, Math.floor((maximum - minimum) / step));
     return Array.from({ length: count + 1 }, (_, index) => {
       const amount = Math.round((minimum + index * step) * 10) / 10;
-      return { value: formatted(amount), label: formatted(amount) };
+      return { value: formatted(amount), label: displayTemperature(formatted(amount), locale) };
     });
-  }, [maximum, minimum, step]);
+  }, [maximum, minimum, step, locale]);
   const fallback = parsed ?? criticalMin ?? criticalMax ?? 0;
   const selectedValue = formatted(Math.min(maximum, Math.max(minimum, Math.round(fallback / step) * step)));
   const columns: RollerPickerColumn[] = [{ key: 'temperature', label: '°C', items: values }];
   const range = [
-    criticalMin === null ? null : formatted(criticalMin),
-    criticalMax === null ? null : formatted(criticalMax),
+    criticalMin === null ? null : displayTemperature(formatted(criticalMin), locale),
+    criticalMax === null ? null : displayTemperature(formatted(criticalMax), locale),
   ].filter(Boolean).join(' – ');
 
   return (
@@ -70,14 +76,14 @@ export function HaccpTemperatureInput({
         <Text style={styles.label}>{label}</Text>
         {!!range && (
           <Text style={[styles.range, nonconform && styles.rangeAlert]}>
-            {range} °C {nonconform ? '· NECONFORM' : ''}
+            {range} °C {nonconform ? `· ${t('operational.temperature.nonconform')}` : ''}
           </Text>
         )}
       </View>
       <View style={[styles.control, large && styles.controlLarge, nonconform && styles.controlAlert]}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Minus 0,5 grade"
+          accessibilityLabel={t('operational.temperature.minus', { step: displayTemperature(formatted(step), locale) })}
           onPress={() => adjust(-1)}
           style={({ pressed }) => [styles.stepButton, large && styles.stepButtonLarge, pressed && styles.pressed]}>
           <Ionicons name="remove" size={large ? 26 : 21} color={Brand.navyDeep} />
@@ -88,14 +94,14 @@ export function HaccpTemperatureInput({
           onPress={() => setOpen(true)}
           style={({ pressed }) => [styles.valueWrap, pressed && styles.pressed]}>
           <Text style={[styles.input, large && styles.inputLarge, nonconform && styles.inputAlert]}>
-            {value || '0,0'}
+            {displayTemperature(value || '0,0', locale)}
           </Text>
           <Text style={[styles.unit, large && styles.unitLarge]}>°C</Text>
           <Ionicons name="chevron-down" size={17} color={Brand.muted} style={styles.chevron} />
         </Pressable>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Plus 0,5 grade"
+          accessibilityLabel={t('operational.temperature.plus', { step: displayTemperature(formatted(step), locale) })}
           onPress={() => adjust(1)}
           style={({ pressed }) => [styles.stepButton, large && styles.stepButtonLarge, pressed && styles.pressed]}>
           <Ionicons name="add" size={large ? 26 : 21} color={Brand.navyDeep} />

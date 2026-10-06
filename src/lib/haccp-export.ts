@@ -10,6 +10,7 @@ import { File, Paths } from 'expo-file-system';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { Platform } from 'react-native';
+import { printHtmlInBrowser } from '@/lib/web-print';
 
 import type { HaccpFormDefinition } from '@/constants/haccp-forms';
 import type { Locale } from '@/i18n/translations';
@@ -38,7 +39,7 @@ export async function exportHaccpDocumentPdf(document: HaccpDocument, form: Hacc
   const logo = await getLogoDataUri().catch(() => null);
   const html = buildHaccpDocumentHtml(document, form, locale, logo);
   if (Platform.OS === 'web') {
-    await Print.printAsync({ html });
+    await printHtmlInBrowser(html);
     return null;
   }
   const generated = await Print.printToFileAsync({ html });
@@ -60,7 +61,7 @@ export async function exportHaccpControlPackPdf(
   const logo = await getLogoDataUri().catch(() => null);
   const html = buildHaccpControlPackHtml(documents, locale, periodLabel, logo);
   if (Platform.OS === 'web') {
-    await Print.printAsync({ html });
+    await printHtmlInBrowser(html);
     return null;
   }
   const generated = await Print.printToFileAsync({ html });

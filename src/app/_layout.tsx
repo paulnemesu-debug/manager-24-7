@@ -20,10 +20,11 @@ import { Appearance, StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppErrorBoundary } from '@/components/app-error-boundary';
+import { PlatformAlerts } from '@/components/platform-alerts';
 import { installClientErrorHandler } from '@/lib/client-errors';
 
 import { AuthProvider } from '@/contexts/auth-context';
-import { LocaleProvider } from '@/contexts/locale-context';
+import { LocaleProvider, useI18n } from '@/contexts/locale-context';
 import { PreferencesProvider } from '@/contexts/preferences-context';
 import { SubscriptionProvider } from '@/contexts/subscription-context';
 import { WorkspaceProvider } from '@/contexts/workspace-context';
@@ -31,11 +32,12 @@ import { WorkspaceProvider } from '@/contexts/workspace-context';
 void SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 function AppNavigator() {
+  const { t } = useI18n();
   return (
     <WorkspaceProvider>
       <Head>
         <title>Manager 24/7 by PARADIM</title>
-        <meta name="description" content="Bucătăria ta, sub control — costuri, producție și HACCP." />
+        <meta name="description" content={t('operational.shared.description')} />
       </Head>
       <Stack
         screenOptions={{
@@ -127,6 +129,7 @@ function RootLayout() {
           <AuthProvider>
             <PreferencesProvider>
               <SubscriptionProvider>
+                <PlatformAlerts />
                 <AppNavigator />
               </SubscriptionProvider>
             </PreferencesProvider>

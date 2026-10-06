@@ -26,6 +26,7 @@ import { useWorkspace } from '@/contexts/workspace-context';
 import { buildConsumptionImportPreview, parseConsumptionFile, type ConsumptionImportPreview } from '@/lib/consumption-import';
 import { scanConsumptionDocument } from '@/lib/consumption-scan';
 import { scanErrorMessage } from '@/lib/scan-errors';
+import { displayUnit } from '@/lib/display-unit';
 import {
   calculateBulkBatchTotals,
   calculateBulkGrossQuantity,
@@ -64,6 +65,7 @@ export default function BulkScreen() {
   const params = useLocalSearchParams<{ id?: string }>();
   const auth = useAuth();
   const { t, locale } = useI18n();
+  const unitLabel = (unit: QuantityUnit) => displayUnit(unit, locale);
   const { format, defaultVatPercent } = usePreferences();
   const { isViewer } = useSubscription();
   const { recipes, catalog } = useWorkspace();
@@ -303,7 +305,7 @@ export default function BulkScreen() {
             <View style={styles.fieldsRow}>
               <Field style={styles.field} label={t('bulk.quantity')} keyboardType="decimal-pad" value={line.quantity ? String(line.quantity) : ''} onChangeText={(value) => updateLine(line.id, { quantity: toNumber(value) })} />
               <View style={styles.field}>
-                <Select label={t('bulk.unit')} placeholder="—" value={line.unit} options={UNITS.map((unit) => ({ value: unit, label: unit }))}
+                <Select label={t('bulk.unit')} placeholder="—" value={line.unit} options={UNITS.map((unit) => ({ value: unit, label: unitLabel(unit) }))}
                   onChange={(unit) => unit && updateLine(line.id, { unit, priceUnit: unit === 'g' ? 'kg' : unit === 'ml' ? 'l' : unit })} />
               </View>
               <Field style={styles.field} label={t('bulk.unitPrice')} keyboardType="decimal-pad" value={line.purchasePrice ? String(line.purchasePrice) : ''} onChangeText={(value) => updateLine(line.id, { purchasePrice: toNumber(value) })} />
@@ -320,7 +322,7 @@ export default function BulkScreen() {
               <Text style={styles.grossQuantity}>
                 {t('bulk.grossQuantity', {
                   value: format.number(calculateBulkGrossQuantity(line.quantity, line.lossPercent ?? 0)),
-                  unit: line.unit,
+                  unit: unitLabel(line.unit),
                 })}
               </Text>
               <Text style={styles.lineCost}>{format.money(line.cost)}</Text>

@@ -6,6 +6,8 @@
  */
 
 import { normalizeQuantity } from '@/lib/calculations';
+import { displayUnit } from '@/lib/display-unit';
+import type { Locale } from '@/i18n/translations';
 import type { BulkBatchTotals, OperationalLine } from '@/types/operations';
 import type { CatalogIngredient, PriceUnit, Recipe } from '@/types/recipe';
 
@@ -225,11 +227,13 @@ export function buildShoppingListMessage({
   lines,
   totalLabel,
   totalValue,
+  locale = 'ro',
 }: {
   title: string;
   lines: readonly ShoppingLine[];
   totalLabel: string;
   totalValue: string;
+  locale?: Locale;
 }): string {
   const grouped = new Map<string, ShoppingLine[]>();
   for (const line of lines) {
@@ -238,7 +242,7 @@ export function buildShoppingListMessage({
   }
   const sections = [...grouped.entries()].map(([supplier, supplierLines]) => [
     `\n${supplier}`,
-    ...supplierLines.map((line) => `• ${line.name}: ${line.quantity} ${line.unit}`),
+    ...supplierLines.map((line) => `• ${line.name}: ${line.quantity} ${displayUnit(line.unit, locale)}`),
   ].join('\n'));
   return [title, ...sections, `\n${totalLabel}: ${totalValue}`].join('\n').trim();
 }

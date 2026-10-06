@@ -5,8 +5,6 @@
  * See LICENSE-PROPRIETARY.md.
  */
 
-import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
 import { useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 
@@ -19,6 +17,7 @@ import { Brand, Fonts } from '@/constants/theme';
 import { useI18n } from '@/contexts/locale-context';
 import { useWorkspace } from '@/contexts/workspace-context';
 import { localIsoDate } from '@/lib/local-date-time';
+import { exportHaccpLabelPdf } from '@/lib/haccp-label-export';
 
 const escapeHtml = (value: string) => value
   .replaceAll('&', '&amp;')
@@ -65,9 +64,8 @@ export function HaccpLabelCard() {
       <p class="allergens"><strong>${escapeHtml(t('haccp.allergens'))}:</strong> ${escapeHtml(allergens)}</p>
     </section></body></html>`;
     try {
-      const file = await Print.printToFileAsync({ html });
-      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(file.uri, { mimeType: 'application/pdf' });
-      else Alert.alert(t('haccp.generated'), file.uri);
+      const uri = await exportHaccpLabelPdf(html);
+      if (uri) Alert.alert(t('haccp.generated'), uri);
     } catch (error) {
       Alert.alert(t('haccp.exportFailed'), error instanceof Error ? error.message : t('common.tryAgain'));
     }

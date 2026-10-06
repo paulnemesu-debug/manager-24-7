@@ -16,6 +16,7 @@ import { suggestAllergens } from '@/constants/allergen-presets';
 import { ALLERGEN_LABELS, ALLERGENS, type Allergen } from '@/constants/allergens';
 import { Brand, Fonts, Radius, TabularNumbers } from '@/constants/theme';
 import { useI18n } from '@/contexts/locale-context';
+import { displayUnit } from '@/lib/display-unit';
 import { usePreferences } from '@/contexts/preferences-context';
 import { calculateIngredientCost, calculateUnitPrice, compatibleQuantityUnits } from '@/lib/calculations';
 import type {
@@ -66,10 +67,10 @@ export function IngredientRow({
   }, [catalog, ingredient.name, locked]);
 
   const unitOptions: SelectOption<QuantityUnit>[] = compatibleQuantityUnits(ingredient.priceUnit)
-    .map((unit) => ({ value: unit, label: unit }));
+    .map((unit) => ({ value: unit, label: displayUnit(unit, locale) }));
   const priceUnitOptions: SelectOption<PriceUnit>[] = priceUnits.map((unit) => ({
     value: unit,
-    label: unit,
+    label: displayUnit(unit, locale),
   }));
   const allergenOptions: SelectOption<Allergen>[] = ALLERGENS.map((allergen) => ({
     value: allergen,

@@ -81,7 +81,7 @@ export function MenuEngineeringMatrix({ items }: { items: readonly MenuEngineeri
         })}
 
         <SvgText x={LEFT + PLOT_W / 2} y={HEIGHT - 6} textAnchor="middle" fill={Brand.muted} fontSize={9}>{t('menu.axisPopularity')}</SvgText>
-        <SvgText x={8} y={TOP + PLOT_H / 2} textAnchor="middle" fill={Brand.muted} fontSize={9} rotation="-90" origin={`8, ${TOP + PLOT_H / 2}`}>{t('menu.axisMargin')}</SvgText>
+        <SvgText x={8} y={TOP + PLOT_H / 2} textAnchor="middle" fill={Brand.muted} fontSize={9} transform={`rotate(-90 8 ${TOP + PLOT_H / 2})`}>{t('menu.axisMargin')}</SvgText>
       </Svg>
       <Text style={styles.hint}>{t('menu.matrixHint')}</Text>
     </View>

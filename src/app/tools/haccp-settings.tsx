@@ -152,7 +152,7 @@ export default function HaccpSettingsScreen() {
       />
 
       <Card>
-        <SectionHeader eyebrow="ANTET AUTOMAT" title={locale === 'ro' ? 'Locație și responsabil' : 'Location and responsible person'} />
+        <SectionHeader eyebrow={locale === 'ro' ? 'ANTET AUTOMAT' : 'AUTOMATIC HEADER'} title={locale === 'ro' ? 'Locație și responsabil' : 'Location and responsible person'} />
         {!!locations.length && (
           <Select
             label={locale === 'ro' ? 'Locație implicită' : 'Default location'}
@@ -182,7 +182,7 @@ export default function HaccpSettingsScreen() {
       </Card>
 
       <Card tone="soft">
-        <SectionHeader eyebrow="LOCAȚIE" title={locale === 'ro' ? 'Administrare centralizată' : 'Centralised management'} />
+        <SectionHeader eyebrow={locale === 'ro' ? 'LOCAȚIE' : 'LOCATION'} title={locale === 'ro' ? 'Administrare centralizată' : 'Centralised management'} />
         <Body>{locale === 'ro'
           ? 'Locația se creează și se editează din Cont, apoi este folosită automat în inventar, HACCP și rapoarte.'
           : 'Create and edit the location in Account, then reuse it automatically in inventory, HACCP and reports.'}</Body>
@@ -195,7 +195,7 @@ export default function HaccpSettingsScreen() {
       </Card>
 
       <Card>
-        <SectionHeader eyebrow="NOMENCLATOR" title={locale === 'ro' ? 'Echipamente monitorizate' : 'Monitored equipment'} />
+        <SectionHeader eyebrow={locale === 'ro' ? 'NOMENCLATOR' : 'REGISTER'} title={locale === 'ro' ? 'Echipamente monitorizate' : 'Monitored equipment'} />
         {equipment.map((item) => (
           <View key={item.id} style={styles.equipmentRow}>
             <View style={styles.equipmentIcon}><Ionicons name={item.kind === 'hot' ? 'flame-outline' : 'snow-outline'} size={20} color={Brand.navy} /></View>
@@ -213,7 +213,7 @@ export default function HaccpSettingsScreen() {
       </Card>
 
       <Card tone="gold">
-        <SectionHeader eyebrow={draft.id ? 'EDITARE' : 'ECHIPAMENT NOU'} title={draft.id ? draft.name : (locale === 'ro' ? 'Adaugă echipament' : 'Add equipment')} />
+        <SectionHeader eyebrow={draft.id ? (locale === 'ro' ? 'EDITARE' : 'EDITING') : (locale === 'ro' ? 'ECHIPAMENT NOU' : 'NEW EQUIPMENT')} title={draft.id ? draft.name : (locale === 'ro' ? 'Adaugă echipament' : 'Add equipment')} />
         <Field label={locale === 'ro' ? 'Denumire' : 'Name'} value={draft.name} onChangeText={(name) => setDraft((current) => ({ ...current, name }))} />
         <ChoiceRow
           label={locale === 'ro' ? 'Tip' : 'Type'}

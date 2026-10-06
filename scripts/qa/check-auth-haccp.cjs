@@ -1,8 +1,8 @@
+const { resolveSourceName, sourceFile, evaluateSource } = require('./source-loader.cjs');
 // Actual React components and persistence, with explicit native/service adapters.
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert/strict');
-const ts = require('typescript');
 const React = require('react');
 const {act,create} = require('react-test-renderer');
 const project = path.resolve(__dirname, '../..');
@@ -16,7 +16,8 @@ const auth={isAuthenticated:false,isLoading:false,
   verifyCode:async(email,code)=>{verified.push({email,code});if(verifyFailure)throw Error('Token has expired or is invalid');}};
 const router={replace:route=>routes.push(route)};
 const widgets=new Proxy({}, {get:(_,name)=>props=>e(String(name),props,props.children)});
-function load(name) {
+function load(name, importer) {
+  name = resolveSourceName(name, importer, project);
   if(name==='react')return React;
   if(name==='react/jsx-runtime')return require('react/jsx-runtime');
   if(name==='react-native')return {View:'View',Text:'Text',Pressable:'Pressable',
@@ -34,16 +35,7 @@ function load(name) {
     setItem:async(key,value)=>{if(favoriteFailure)throw Error('storage-full');storage.set(key,value)},
     removeItem:async key=>storage.delete(key)}};
   if (name.startsWith('@/') && name.endsWith('.json')) return JSON.parse(fs.readFileSync(path.join(project, 'src', name.slice(2)), 'utf8'));
-  if(name.startsWith('@/')) {
-    const stem=path.join(project,'src',name.slice(2));
-    const file=['.ts','.tsx'].map(ext=>stem+ext).find(fs.existsSync);
-    if(!file)throw Error('Missing import '+name);
-    if(cache.has(file))return cache.get(file).exports;
-    const mod={exports:{}};cache.set(file,mod);
-    const code=ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
-    new Function('require','module','exports',code)(load,mod,mod.exports);
-    return mod.exports;
-  }
+  if (name.startsWith('@/')) return evaluateSource(sourceFile(path.join(project, 'src', name.slice(2))), load, cache);
   throw Error('Unexpected import '+name);
 }
 const SignIn=load('@/app/sign-in').default;

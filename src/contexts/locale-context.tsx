@@ -25,7 +25,7 @@ import {
 } from '@/i18n/translations';
 import { createFormatters, type Formatters } from '@/lib/format';
 
-const STORAGE_KEY = 'professional_foodcost.locale.v1';
+export const LOCALE_STORAGE_KEY = 'professional_foodcost.locale.v1';
 
 function isLocale(value: string | null | undefined): value is Locale {
   return !!value && (SUPPORTED_LOCALES as readonly string[]).includes(value);
@@ -69,7 +69,7 @@ export function LocaleProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     let cancelled = false;
-    AsyncStorage.getItem(STORAGE_KEY)
+    AsyncStorage.getItem(LOCALE_STORAGE_KEY)
       .then((stored) => {
         if (cancelled || chosenThisSession.current) return;
         setLocaleState(isLocale(stored) ? stored : detectDeviceLocale());
@@ -88,7 +88,7 @@ export function LocaleProvider({ children }: PropsWithChildren) {
   const setLocale = useCallback((next: Locale) => {
     chosenThisSession.current = true;
     setLocaleState(next);
-    void AsyncStorage.setItem(STORAGE_KEY, next).catch(() => undefined);
+    void AsyncStorage.setItem(LOCALE_STORAGE_KEY, next).catch(() => undefined);
   }, []);
 
   const value = useMemo<LocaleContextValue>(() => ({

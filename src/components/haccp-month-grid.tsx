@@ -8,6 +8,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Brand, Fonts, Radius, TabularNumbers } from '@/constants/theme';
+import { useI18n } from '@/contexts/locale-context';
 import type { HaccpDocumentRow } from '@/types/haccp';
 
 function rowStatus(row: HaccpDocumentRow | undefined) {
@@ -27,6 +28,7 @@ export function HaccpMonthGrid({
   selectedDay?: string | null;
   onSelectDay: (day: string, row?: HaccpDocumentRow) => void;
 }) {
+  const { t } = useI18n();
   const byDay = new Map(rows.map((row) => [row.values.day, row]));
   const today = String(new Date().getDate());
   return (
@@ -38,7 +40,7 @@ export function HaccpMonthGrid({
           <Pressable
             key={day}
             accessibilityRole="button"
-            accessibilityLabel={`Ziua ${day}`}
+            accessibilityLabel={t('operational.common.dayLabel', { day })}
             accessibilityState={{ selected: selectedDay === day }}
             onPress={() => onSelectDay(day, row)}
             style={({ pressed }) => [

@@ -1,3 +1,4 @@
+import { translate, type Locale, type TranslationKey } from '@/i18n/translations';
 import { isIsoDate } from '@/lib/local-date-time';
 import { createOperationalStore, type OperationalSync } from '@/lib/operational-sync';
 import type { HrEmployee } from '@/types/hr';
@@ -8,7 +9,11 @@ export type HrLifecycle = OperationalSync & {
   equipmentIssued: boolean; accessGranted: boolean; equipmentReturned: boolean; keysReturned: boolean;
   accessRevoked: boolean; handover: boolean; finalDocuments: boolean; notes: string; updatedAt: string;
 };
-export const HR_LIFECYCLE_LABELS = { onboarding: 'Angajare', active: 'Activ', offboarding: 'Pregătire plecare', left: 'Plecat' };
+export function getHrLifecycleLabels(locale: Locale = 'ro') {
+  const t = (key: TranslationKey, params?: Record<string, string | number>) => translate(locale, key, params);
+  return { onboarding: t('operational.lifecycle.onboarding'), active: t('operational.lifecycle.active'), offboarding: t('operational.lifecycle.offboarding'), left: t('operational.lifecycle.left') };
+}
+export const HR_LIFECYCLE_LABELS = getHrLifecycleLabels();
 export const HR_ONBOARDING_CHECKS = [
   { key: 'documents', label: 'Documentele de angajare verificate' },
   { key: 'medical', label: 'Fișa de aptitudine verificată' },
@@ -23,6 +28,11 @@ export const HR_OFFBOARDING_CHECKS = [
   { key: 'accessRevoked', label: 'Accesul în aplicații revocat' },
   { key: 'finalDocuments', label: 'Documentele de plecare verificate' },
 ] as const;
+export function getHrLifecycleChecks(status: HrLifecycle['status'], locale: Locale = 'ro') {
+  const checks = status === 'offboarding' || status === 'left' ? HR_OFFBOARDING_CHECKS : HR_ONBOARDING_CHECKS;
+  return checks.map((check) => ({ ...check, label: translate(locale, `operational.lifecycle.${check.key}`) }));
+}
+
 export function defaultHrLifecycle(employee: Pick<HrEmployee, 'id' | 'active'>): HrLifecycle {
   return { employeeId: employee.id, status: employee.active ? 'active' : 'left', hireDate: '', exitDate: '',
     documents: false, medical: false, training: false, equipmentIssued: false, accessGranted: false,
@@ -32,12 +42,14 @@ export function hrLifecycleProgress(item: HrLifecycle) {
   const checks = item.status === 'offboarding' || item.status === 'left' ? HR_OFFBOARDING_CHECKS : HR_ONBOARDING_CHECKS;
   return { completed: checks.filter((check) => item[check.key]).length, total: checks.length };
 }
-export function validateHrLifecycle(item: HrLifecycle) {
-  if (!Object.hasOwn(HR_LIFECYCLE_LABELS, item.status)) throw new Error('Stare HR invalidă.');
-  if ((item.hireDate && !isIsoDate(item.hireDate)) || (item.exitDate && !isIsoDate(item.exitDate))) throw new Error('Introdu date calendaristice valide (AAAA-LL-ZZ).');
-  if (item.hireDate && item.exitDate && item.exitDate < item.hireDate) throw new Error('Plecarea nu poate preceda angajarea.');
-  if (item.notes.length > 4000) throw new Error('Observațiile pot avea maximum 4000 de caractere.');
-  if (item.status === 'left' && !item.exitDate) throw new Error('Completează data plecării.');
+export function validateHrLifecycle(item: HrLifecycle, locale: Locale = 'ro') {
+  const t = (key: TranslationKey, params?: Record<string, string | number>) => translate(locale, key, params);
+
+  if (!Object.hasOwn(HR_LIFECYCLE_LABELS, item.status)) throw new Error(t('operational.lifecycle.invalidStatus'));
+  if ((item.hireDate && !isIsoDate(item.hireDate)) || (item.exitDate && !isIsoDate(item.exitDate))) throw new Error(t('operational.lifecycle.dateValidation'));
+  if (item.hireDate && item.exitDate && item.exitDate < item.hireDate) throw new Error(t('operational.lifecycle.dateOrder'));
+  if (item.notes.length > 4000) throw new Error(t('operational.lifecycle.length'));
+  if (item.status === 'left' && !item.exitDate) throw new Error(t('operational.lifecycle.requiredExit'));
 }
 const store = createOperationalStore<HrLifecycle>({
   key: (userId) => `manager247.hr-lifecycle.v1.${userId}`, table: 'hr_lifecycle', id: (item) => item.employeeId,
@@ -53,8 +65,8 @@ const store = createOperationalStore<HrLifecycle>({
 export const loadHrLifecycle = store.load;
 export const loadCachedHrLifecycle = store.cached;
 export const resolveHrLifecycle = store.resolve;
-export const saveHrLifecycle = (userId: string, item: HrLifecycle) => {
-  validateHrLifecycle(item);
+export const saveHrLifecycle = (userId: string, item: HrLifecycle, locale: Locale = 'ro') => {
+  validateHrLifecycle(item, locale);
   return store.save(userId, item);
 };
 export function applyHrLifecycle(employees: HrEmployee[], items: HrLifecycle[]) {

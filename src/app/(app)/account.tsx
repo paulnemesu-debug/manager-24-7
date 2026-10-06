@@ -1,3 +1,4 @@
+import { locationErrorMessage } from '@/lib/locations-repository';
 /**
  * MANAGER 24/7™ by PARADIM — proprietary software.
  * Copyright © 2026 PARADIM Operations SRL. All rights reserved.
@@ -15,7 +16,7 @@ import { ChoiceRow } from '@/components/inputs';
 import { AppButton, Body, BrandHeader, Card, Field, IconButton, SectionHeader, StatusPill, Title } from '@/components/ui';
 import { Brand, Fonts, Radius } from '@/constants/theme';
 import { BETA_ACCESS, IS_PLAY_STORE_BUILD } from '@/constants/paradim';
-import { COPYRIGHT_NOTICE, FOUNDER_NOTICE, PRODUCT_TRADE_NAME, PROPRIETARY_NOTICE } from '@/constants/legal';
+import { COPYRIGHT_NOTICE, COPYRIGHT_NOTICE_EN, FOUNDER_NOTICE, FOUNDER_NOTICE_EN, PRODUCT_TRADE_NAME } from '@/constants/legal';
 import { useAuth } from '@/contexts/auth-context';
 import { useI18n } from '@/contexts/locale-context';
 import { usePreferences } from '@/contexts/preferences-context';
@@ -229,7 +230,7 @@ export default function AccountScreen() {
                 .then((result) => {
                   if (!result.cloudComplete) Alert.alert(locale === 'ro' ? 'Export cu observații' : 'Export with notes', locale === 'ro' ? 'Exportul a fost creat. Unele module nu au putut fi citite sau verificate; detaliile sunt în raportul din fișier.' : 'Export created. Some modules could not be read or verified; see the report in the file.');
                 })
-                .catch((error) => Alert.alert('Export nereușit', error instanceof Error ? error.message : 'Încearcă din nou.'))
+                .catch((error) => Alert.alert(t('operational.account.exportError'), locationErrorMessage(error, locale)))
                 .finally(() => setIsExporting(false));
             }}
           />
@@ -252,15 +253,15 @@ export default function AccountScreen() {
       </FolderSection>
 
       <FolderSection id="about" icon="information-circle-outline" photo="about" accent="gold"
-        title={locale === 'ro' ? 'Despre aplicație' : 'About the app'}
+        title={locale === 'ro' ? t('operational.account.about') : 'About the app'}
         summary="MANAGER 24/7™ by PARADIM">
         <Card>
-          <SectionHeader eyebrow="INFORMAȚII LEGALE" title="Despre aplicație" />
+          <SectionHeader eyebrow={t('operational.account.legal')} title={t('operational.account.about')} />
           <Text style={styles.aboutProduct}>{PRODUCT_TRADE_NAME}</Text>
-          <Body>{FOUNDER_NOTICE}</Body>
-          <Body>Titularul drepturilor patrimoniale și proprietarul comercial: PARADIM Operations SRL.</Body>
-          <Body>{COPYRIGHT_NOTICE}</Body>
-          <Text style={styles.proprietaryNotice}>{PROPRIETARY_NOTICE}</Text>
+          <Body>{locale === 'ro' ? FOUNDER_NOTICE : FOUNDER_NOTICE_EN}</Body>
+          <Body>{t('operational.account.owner')}</Body>
+          <Body>{locale === 'ro' ? COPYRIGHT_NOTICE : COPYRIGHT_NOTICE_EN}</Body>
+          <Text style={styles.proprietaryNotice}>{t('operational.account.proprietary')}</Text>
         </Card>
       </FolderSection>
     </FolderHub>
@@ -268,6 +269,7 @@ export default function AccountScreen() {
 }
 
 function LocationsCard({ userId, isAdmin }: { userId: string; isAdmin: boolean }) {
+  const { t, locale } = useI18n();
   const [locations, setLocations] = useState<BusinessLocation[]>([]);
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
@@ -294,7 +296,7 @@ function LocationsCard({ userId, isAdmin }: { userId: string; isAdmin: boolean }
       resetForm();
       load();
     } catch (error) {
-      Alert.alert('Locația nu a fost salvată', error instanceof Error ? error.message : 'Încearcă din nou.');
+      Alert.alert(t('operational.locations.saveError'), locationErrorMessage(error, locale));
     } finally { setBusy(false); }
   };
 
@@ -306,12 +308,12 @@ function LocationsCard({ userId, isAdmin }: { userId: string; isAdmin: boolean }
 
   const remove = (location: BusinessLocation) => {
     Alert.alert(
-      'Ștergi locația?',
-      `${location.name} va fi eliminată. Unele configurări asociate pot fi șterse, iar alte documente vor rămâne fără locația selectată.`,
+      t('operational.locations.remove'),
+      t('operational.locations.deleteBody', { name: location.name }),
       [
-        { text: 'Renunță', style: 'cancel' },
+        { text: t('operational.common.cancel'), style: 'cancel' },
         {
-          text: 'Șterge',
+          text: t('operational.locations.delete'),
           style: 'destructive',
           onPress: () => {
             setBusy(true);
@@ -321,8 +323,8 @@ function LocationsCard({ userId, isAdmin }: { userId: string; isAdmin: boolean }
                 load();
               })
               .catch((error) => Alert.alert(
-                'Locația nu a fost ștearsă',
-                error instanceof Error ? error.message : 'Încearcă din nou.',
+                t('operational.locations.deleteError'),
+                locationErrorMessage(error, locale),
               ))
               .finally(() => setBusy(false));
           },
@@ -336,26 +338,26 @@ function LocationsCard({ userId, isAdmin }: { userId: string; isAdmin: boolean }
   return (
     <Card tone={isAdmin ? 'gold' : 'soft'}>
       <SectionHeader
-        eyebrow={isAdmin ? 'ADMINISTRATOR · MULTI-LOCAȚIE' : 'LOCAȚIA CONTULUI'}
-        title={isAdmin ? 'Locațiile companiei' : 'Locația ta'}
+        eyebrow={isAdmin ? t('operational.locations.multi') : t('operational.locations.account')}
+        title={isAdmin ? t('operational.locations.company') : t('operational.locations.your')}
       />
       <Body>{isAdmin
-        ? 'Poți crea, edita și șterge mai multe locații. Datele operaționale rămân separate pe fiecare locație.'
-        : 'Contul include o singură locație, pe care o poți actualiza oricând. Multi-locație va fi disponibil ca abonament suplimentar.'}</Body>
+        ? t('operational.locations.multiNote')
+        : t('operational.locations.accountNote')}</Body>
 
       {showForm && (
         <View style={styles.locationForm}>
-          <Field label="Denumirea locației" value={name} onChangeText={setName} />
-          <Field label="Adresă" value={address} onChangeText={setAddress} />
+          <Field label={t('operational.locations.name')} value={name} onChangeText={setName} />
+          <Field label={t('operational.locations.address2')} value={address} onChangeText={setAddress} />
           <View style={styles.locationFormActions}>
             <AppButton
-              label={editingId ? 'Salvează modificările' : 'Adaugă locația'}
+              label={editingId ? t('operational.locations.save') : t('operational.locations.add')}
               icon={editingId ? 'save-outline' : 'business-outline'}
               loading={busy}
               disabled={!name.trim()}
               onPress={() => void save()}
             />
-            {!!editingId && <AppButton label="Renunță" variant="ghost" onPress={resetForm} />}
+            {!!editingId && <AppButton label={t('operational.common.cancel')} variant="ghost" onPress={resetForm} />}
           </View>
         </View>
       )}
@@ -364,15 +366,15 @@ function LocationsCard({ userId, isAdmin }: { userId: string; isAdmin: boolean }
         <View key={location.id} style={styles.teamRow}>
           <View style={styles.teamRowCopy}>
             <Text style={styles.teamEmail}>{location.name}</Text>
-            <Text style={styles.teamRole}>{location.address || 'Adresă necompletată'}</Text>
+            <Text style={styles.teamRole}>{location.address || t('operational.locations.noAddress')}</Text>
           </View>
-          <StatusPill label="Activă" status="healthy" />
+          <StatusPill label={t('operational.locations.active')} status="healthy" />
           <View style={styles.locationActions}>
-            <IconButton icon="create-outline" label="Editează" onPress={() => edit(location)} />
+            <IconButton icon="create-outline" label={t('operational.locations.edit')} onPress={() => edit(location)} />
             {isAdmin && (
               <IconButton
                 icon="trash-outline"
-                label="Șterge"
+                label={t('operational.locations.delete')}
                 danger
                 onPress={() => remove(location)}
               />
@@ -440,11 +442,11 @@ function TeamCard() {
       <Body>{t('account.teamBody')}</Body>
 
       <ChoiceRow
-        label="Rolul colegului"
+        label={t('operational.account.colleagueRole')}
         options={[
           { value: 'manager', label: 'Manager' },
-          { value: 'head_chef', label: 'Bucătar-șef' },
-          { value: 'viewer', label: 'Doar citire' },
+          { value: 'head_chef', label: t('operational.account.chef') },
+          { value: 'viewer', label: t('operational.account.viewer') },
         ]}
         value={teamRole}
         onChange={setTeamRole}
@@ -487,7 +489,7 @@ function TeamCard() {
         return <View key={member.id} style={styles.teamRow}>
           <View style={styles.teamRowCopy}>
             <Text style={styles.teamEmail} numberOfLines={1}>{member.invitedEmail}</Text>
-            <Text style={styles.teamRole}>{member.role === 'head_chef' ? 'Bucătar-șef' : member.role === 'manager' ? 'Manager' : 'Doar citire'}</Text>
+            <Text style={styles.teamRole}>{member.role === 'head_chef' ? t('operational.account.chef') : member.role === 'manager' ? 'Manager' : t('operational.account.viewer')}</Text>
             <StatusPill
               label={statusLabel}
               status={member.status === 'active' ? 'healthy' : deliveryFailed ? 'critical' : 'watch'}

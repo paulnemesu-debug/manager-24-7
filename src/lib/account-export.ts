@@ -11,6 +11,7 @@ import { Platform } from 'react-native';
 import { downloadWebFile } from '@/lib/web-download';
 
 import { buildAccountSnapshot } from '@/lib/account-snapshot';
+import { OperationalError } from '@/lib/operational-sync';
 import type { CatalogIngredient, Recipe } from '@/types/recipe';
 
 export async function exportAccountData(userId: string, recipes: Recipe[], catalog: CatalogIngredient[]) {
@@ -23,7 +24,7 @@ export async function exportAccountData(userId: string, recipes: Recipe[], catal
   const file = new File(Paths.cache, fileName);
   file.create({ overwrite: true, intermediates: true });
   file.write(JSON.stringify(snapshot, null, 2));
-  if (!(await Sharing.isAvailableAsync())) throw new Error('Partajarea fișierelor nu este disponibilă pe acest dispozitiv.');
+  if (!(await Sharing.isAvailableAsync())) throw new OperationalError('operational.shared.sharingUnavailable');
   await Sharing.shareAsync(file.uri, { mimeType: 'application/json', dialogTitle: 'Export Manager 24/7' });
   return { uri: file.uri, cloudComplete: snapshot.manifest.cloudComplete };
 }

@@ -291,6 +291,7 @@ export function Field({
       <Text style={styles.fieldLabel}>{label}</Text>
       <TextInput
         {...props}
+        accessibilityLabel={props.accessibilityLabel ?? label}
         placeholderTextColor="#98A3AD"
         selectionColor={Brand.tealDeep}
         cursorColor={Brand.tealDeep}

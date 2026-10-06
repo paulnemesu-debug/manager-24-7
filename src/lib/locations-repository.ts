@@ -1,3 +1,5 @@
+import { OperationalError, operationalErrorMessage } from '@/lib/operational-sync';
+import { translate, type Locale, type TranslationKey } from '@/i18n/translations';
 /**
  * MANAGER 24/7™ by PARADIM — proprietary software.
  * Copyright © 2026 PARADIM Operations SRL. All rights reserved.
@@ -73,7 +75,7 @@ const translateLocationError = (error: unknown): Error => {
   if (/location_owner_mismatch|row.level security|permission denied/i.test(message)) {
     return new LocationAccessError('not_found');
   }
-  return error instanceof Error ? error : new Error(message || 'Operațiunea nu a reușit.');
+  return error instanceof Error ? error : message ? new Error(message) : new OperationalError('operational.locations.operationFailed');
 };
 
 export async function listLocations(userId: string): Promise<BusinessLocation[]> {
@@ -116,7 +118,7 @@ export async function addLocation(
   options: LocationAdminOptions = {},
 ): Promise<BusinessLocation> {
   const location = { id: uuid(), name: name.trim(), address: address.trim(), active: true };
-  if (!location.name) throw new Error('Completează denumirea locației.');
+  if (!location.name) throw new OperationalError('operational.locations.requiredName');
   const current = await listLocations(userId);
   const client = supabase;
   const isLocal = userId === 'demo' || isDemoMode || !isSupabaseConfigured || !client;
@@ -152,7 +154,7 @@ export async function updateLocation(
 ): Promise<BusinessLocation> {
   const cleanName = name.trim();
   const cleanAddress = address.trim();
-  if (!cleanName) throw new Error('Completează denumirea locației.');
+  if (!cleanName) throw new OperationalError('operational.locations.requiredName');
 
   const current = await listLocations(userId);
   const existing = current.find((item) => item.id === locationId);
@@ -207,4 +209,9 @@ export async function removeLocation(
   const write = writeCachedLocations(userId, current.filter((item) => item.id !== locationId));
   if (isLocal) await write;
   else await write.catch(() => undefined);
+}
+
+export function locationErrorMessage(error: unknown, locale: Locale, fallbackKey: TranslationKey = 'operational.common.tryAgain') {
+  if (error instanceof LocationAccessError) return translate(locale, error.reason === 'limit' ? 'operational.locations.limit' : error.reason === 'admin_required' ? 'operational.locations.adminRequired' : 'operational.locations.notFound');
+  return operationalErrorMessage(error, locale, fallbackKey);
 }

@@ -13,26 +13,26 @@ import { Brand, Fonts } from '@/constants/theme';
 export default function DailyManager() {
   const router = useRouter();
   const auth = useAuth();
+  const { locale, t } = useI18n();
   const { recipes } = useWorkspace();
-  const { locale } = useI18n();
   const userId = auth.user?.id ?? 'demo';
-  const identity = auth.user?.email ?? 'Operator demo';
+  const identity = auth.user?.email ?? t('operational.daily.demo');
   const { data, error, loading, refresh } = useOperationalResource(useCallback(() => loadDailyOperations(userId, recipes, locale, identity), [userId, recipes, locale, identity]));
   return <Screen>
-    <ToolHeader title="AI Daily Manager" subtitle="Priorități explicabile din datele tale: costuri, tura HACCP, HR, documente, comenzi, inventar și risipă." />
-    <Card tone="navy"><SectionHeader eyebrow="SCOR OPERAȚIONAL AZI" title={loading || !data ? '—' : `${data.score}/100`} light />
-      <Text style={styles.light}>{loading ? 'Se încarcă datele…' : data ? `${data.signals.length} acțiuni necesită atenție.` : 'Scor indisponibil.'}</Text>
-      <Text style={styles.light}>Scor orientativ pe baza înregistrărilor disponibile.</Text>
+    <ToolHeader title="AI Daily Manager" subtitle={t('operational.daily.subtitle')} />
+    <Card tone="navy"><SectionHeader eyebrow={t('operational.daily.score')} title={loading || !data ? '—' : `${data.score}/100`} light />
+      <Text style={styles.light}>{loading ? t('operational.common.loadingData') : data ? t('operational.daily.count', { count: data.signals.length }) : t('operational.daily.unavailable')}</Text>
+      <Text style={styles.light}>{t('operational.daily.note')}</Text>
     </Card>
-    {!!error && <Card><Text style={styles.detail}>{error}</Text><AppButton label="Reîncearcă" onPress={refresh} /></Card>}
-    {!!data?.pendingSync && <Card><Text style={styles.detail}>{data.pendingSync} înregistrări locale așteaptă sincronizarea sau rezolvarea unui conflict. Prioritățile includ modificările locale.</Text></Card>}
-    {data && <Card><SectionHeader eyebrow="DAILY OPERATIONS" title="Tura de azi" />
-      <Text style={styles.detail}>HACCP: {data.input.haccpToday}/{data.input.haccpExpected} conforme · Pontaj confirmat: {data.input.attendanceRecorded}/{data.input.activeEmployees}</Text>
-      <View style={styles.row}><AppButton label="HACCP" variant="secondary" onPress={() => router.push('/tools/haccp')} /><AppButton label="Pontaj" variant="secondary" onPress={() => router.push('/tools/hr?mode=schedule' as never)} /></View>
+    {!!error && <Card><Text style={styles.detail}>{error}</Text><AppButton label={t('operational.common.retry')} onPress={refresh} /></Card>}
+    {!!data?.pendingSync && <Card><Text style={styles.detail}>{t('operational.daily.pending', { count: data.pendingSync })}</Text></Card>}
+    {data && <Card><SectionHeader eyebrow="DAILY OPERATIONS" title={t('operational.daily.shift')} />
+      <Text style={styles.detail}>{t('operational.daily.shiftSummary', { done: data.input.haccpToday, expected: data.input.haccpExpected, recorded: data.input.attendanceRecorded, employees: data.input.activeEmployees })}</Text>
+      <View style={styles.row}><AppButton label="HACCP" variant="secondary" onPress={() => router.push('/tools/haccp')} /><AppButton label={t('operational.daily.attendance')} variant="secondary" onPress={() => router.push('/tools/hr?mode=schedule' as never)} /></View>
     </Card>}
     {data?.signals.map((signal) => <Pressable key={signal.id} accessibilityRole="button" onPress={() => router.push(signal.route as never)}>
       <Card><View style={styles.row}><View style={styles.flex}><Text style={styles.title}>{signal.title}</Text><Text style={styles.detail}>{signal.detail}</Text></View>
-        <StatusPill label={signal.severity === 'critical' ? 'CRITIC' : signal.severity === 'warning' ? 'ATENȚIE' : 'INFO'} status={signal.severity === 'critical' ? 'critical' : signal.severity === 'warning' ? 'watch' : 'neutral'} /></View>
+        <StatusPill label={signal.severity === 'critical' ? t('operational.daily.critical') : signal.severity === 'warning' ? t('operational.daily.warning') : 'INFO'} status={signal.severity === 'critical' ? 'critical' : signal.severity === 'warning' ? 'watch' : 'neutral'} /></View>
         <Text style={styles.action}>{signal.action} →</Text></Card>
     </Pressable>)}
   </Screen>;

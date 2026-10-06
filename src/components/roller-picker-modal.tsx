@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 
 import { Brand, Fonts, Radius, TabularNumbers } from '@/constants/theme';
+import { useI18n } from '@/contexts/locale-context';
 
 export type RollerPickerItem = { value: string; label: string };
 export type RollerPickerColumn = {
@@ -93,8 +94,8 @@ export function RollerPickerModal({
   title,
   columns,
   values,
-  confirmLabel = 'Gata',
-  cancelLabel = 'Renunță',
+  confirmLabel: customConfirmLabel,
+  cancelLabel: customCancelLabel,
   onConfirm,
   onCancel,
 }: {
@@ -107,6 +108,9 @@ export function RollerPickerModal({
   onConfirm: (values: Record<string, string>) => void;
   onCancel: () => void;
 }) {
+  const { locale, t } = useI18n();
+  const confirmLabel = customConfirmLabel ?? (locale === 'ro' ? 'Gata' : 'Done');
+  const cancelLabel = customCancelLabel ?? t('common.cancel');
   const initial = useMemo(() => ({ ...values }), [values]);
   const [selected, setSelected] = useState<Record<string, string>>(initial);
 

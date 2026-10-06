@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { canUseExternalCheckout, resolveDistributionChannel } from '@/constants/paradim';
+import { translate } from '@/i18n/translations';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const read = (path: string) => readFileSync(resolve(root, path), 'utf8');
@@ -20,10 +21,10 @@ describe('Android release invariants', () => {
     const app = JSON.parse(read('app.json'));
     const pkg = JSON.parse(read('package.json'));
     const gradle = read('android/app/build.gradle');
-    expect(app.expo.version).toBe('1.6.1');
+    expect(app.expo.version).toBe('1.6.2');
     expect(pkg.version).toBe(app.expo.version);
-    expect(gradle).toContain('versionName "1.6.1"');
-    expect(gradle).toContain('versionCode 60');
+    expect(gradle).toContain('versionName "1.6.2"');
+    expect(gradle).toContain('versionCode 61');
   });
 
   it('uses the atomic recipe RPC and an unambiguous ingredient relation', () => {
@@ -78,7 +79,7 @@ describe('Android release invariants', () => {
     expect(script).toContain('ndk;27.1.12297006');
     expect(script).toContain('app:assembleRelease');
     expect(script).toContain('-PreactNativeArchitectures=arm64-v8a');
-    expect(script).toContain('manager24-7-v1.6.1-local.apk');
+    expect(script).toContain('manager24-7-v1.6.2-local.apk');
     expect(guide).toContain('nu consumă cota lunară');
     expect(guide).toContain('semnat cu cheia locală de test');
     expect(gradle).toContain('hasLocalReleaseKeystore');
@@ -131,7 +132,9 @@ describe('Android release invariants', () => {
 
     expect(tabs).toContain('getLocationSetupStatus');
     expect(tabs).toContain('<Redirect href="/location-setup" />');
-    expect(setup).toContain('Creează locația și continuă');
+    expect(setup).toContain("t('operational.locations.create')");
+    expect(translate('ro', 'operational.locations.create')).toBe('Creează locația și continuă');
+    expect(translate('en', 'operational.locations.create')).not.toBe(translate('ro', 'operational.locations.create'));
     expect(account).toContain('updateLocation(userId, editingId');
     expect(account).toContain('removeLocation(userId, location.id, { canManageMultiple: isAdmin })');
     expect(haccpSettings).not.toContain('addLocation');
@@ -383,10 +386,12 @@ describe('Android release invariants', () => {
     expect(migration).toContain('create table if not exists public.food_redistributions');
     expect(migration).toContain('(select auth.uid()) = user_id');
     expect(migration).toContain('revoke all on public.waste_prevention_plans');
-    expect(screen).toContain('Plan anual PDF');
-    expect(screen).toContain('Raport anual · Anexa 2 PDF');
-    expect(screen).toContain('Dosar complet PDF');
-    expect(screen).toContain('Completează cu modelul recomandat');
+    expect(screen).toContain('exportWastePlanPdf(currentPlan, locale)');
+    expect(screen).toContain('exportRedistributionPdf(currentYear');
+    expect(screen).toContain('exportWasteDossierPdf(currentYear');
+    expect(screen).toContain("t('waste.fillTemplate')");
+    expect(translate('ro', 'waste.exportPlan')).toBe('Plan anual PDF');
+    expect(translate('en', 'waste.exportPlan')).not.toBe(translate('ro', 'waste.exportPlan'));
     expect(repository).toContain("supabase.from('food_redistributions')");
   });
 
@@ -394,7 +399,9 @@ describe('Android release invariants', () => {
     const screen = read('src/app/tools/efactura.tsx');
     const parser = read('src/lib/efactura.ts');
     const invoice = read('src/app/tools/invoice-import.tsx');
-    expect(screen).toContain('Necesită OAuth + certificat');
+    expect(screen).toContain("t('operational.efactura.requires')");
+    expect(translate('ro', 'operational.efactura.requires')).toBe('Necesită OAuth + certificat');
+    expect(translate('en', 'operational.efactura.requires')).toBe('Requires OAuth + certificate');
     expect(screen).not.toMatch(/clientSecret|refreshToken|accessToken/);
     expect(parser).toContain("throw new Error('efactura_unsafe_xml')");
     expect(parser).toContain('efacturaToScannedInvoice');

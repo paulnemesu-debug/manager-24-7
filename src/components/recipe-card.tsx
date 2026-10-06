@@ -45,7 +45,7 @@ export function RecipeCard({
             <Ionicons name="restaurant-outline" size={20} color={Brand.goldInk} />
             <View style={styles.titleWrap}>
               <Text style={styles.compactTitle} numberOfLines={2}>{recipe.title}</Text>
-              <Text style={styles.compactMeta}>{recipe.isSubRecipe ? t('editor.addSubRecipe') : recipe.category ? t(CATEGORY_LABEL_KEY[recipe.category]) : t('tabs.recipes')}</Text>
+              <Text style={styles.compactMeta}>{recipe.isSubRecipe ? t('editor.subRecipeBadge') : recipe.category ? t(CATEGORY_LABEL_KEY[recipe.category]) : t('tabs.recipes')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={Brand.navy} />
           </View>
@@ -95,7 +95,7 @@ export function RecipeCard({
             {recipe.isSubRecipe && (
               <View style={[styles.badge, styles.badgeSub]}>
                 <Ionicons name="git-merge-outline" size={12} color={Brand.navyDeep} />
-                <Text style={styles.badgeText}>{t('editor.addSubRecipe')}</Text>
+                <Text style={styles.badgeText}>{t('editor.subRecipeBadge')}</Text>
               </View>
             )}
           </View>
