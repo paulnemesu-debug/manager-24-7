@@ -28,7 +28,7 @@ create function auth.uid() returns uuid language sql stable as $$ select nullif(
 grant usage on schema public, auth to authenticated, anon, service_role;
 create table auth.users(id uuid primary key, email text, email_confirmed_at timestamptz);
 create table public.profiles(user_id uuid primary key references auth.users(id), email text, business_name text, role text default 'owner');
-create table public.subscriptions(user_id uuid primary key references auth.users(id), platform text, product_id text, purchase_token_hash text, status text, current_period_start timestamptz, current_period_end timestamptz, auto_renewing boolean, last_verified_at timestamptz);
+create table public.subscriptions(user_id uuid primary key references auth.users(id), platform text, product_id text, purchase_token_hash text, status text, google_order_id text, current_period_start timestamptz, current_period_end timestamptz, auto_renew boolean, auto_renewing boolean, last_verified_at timestamptz);
 create table private.admin_emails(email text primary key);
 create function private.set_updated_at() returns trigger language plpgsql as $$ begin new.updated_at=now(); return new; end $$;
 create function private.grant_admin_access(target_user_id uuid) returns void language plpgsql security definer set search_path='' as $$ begin
@@ -66,6 +66,8 @@ insert into public.workspace_members(owner_user_id,member_user_id,invited_email,
 ('${uid(101)}','${uid(102)}','unverified@example.test','active'),
 ('${uid(101)}','${uid(104)}','legacy-member@example.test','active');`);
 if (!process.argv.includes('--baseline')) await sql(readFileSync('supabase/migrations/20261019173014_harden_workspace_identity_and_entitlements.sql','utf8'));
+if (!process.argv.includes('--baseline')) await sql(readFileSync('supabase/migrations/20260916023654_manager247_pnl_reports_070.sql','utf8'));
+if (!process.argv.includes('--baseline')) await sql(readFileSync('supabase/migrations/20261019173510_atomic_google_play_verification.sql','utf8'));
 const migrationChecks=[];
 for (const [email,expectedStatus,expectedMember] of [['legacy-attacker@example.test','revoked',null],['victim@example.test','pending',null],['unverified@example.test','pending',null],['legacy-member@example.test','active',uid(104)]]) {
   const row=(await db.query(`select status,member_user_id from public.workspace_members where invited_email='${email}'`)).rows[0];
@@ -110,6 +112,15 @@ await test('Authorization independently rejects mismatched Auth identity',async(
 if (!process.argv.includes('--baseline')) {
   try { await sql(readFileSync('supabase/tests/workspace_security.sql','utf8')); results.push({name:'Rollback-only post-deployment SQL smoke test',status:'PASS'}); }
   catch(error) { results.push({name:'Rollback-only post-deployment SQL smoke test',status:'FAIL',error:error.message}); await sql('rollback;'); }
+  try {
+    await sql(readFileSync('supabase/tests/two_account_isolation.sql','utf8'));
+    assert.equal(await scalar("select count(*)::int as value from auth.users where email like 'qa-isolation-%@example.invalid'"),0);
+    assert.equal(await scalar("select count(*)::int as value from public.pnl_reports where notes = 'qa-isolation'"),0);
+    results.push({name:'Two-account hosted-compatible isolation smoke test',status:'PASS'});
+  } catch(error) {
+    results.push({name:'Two-account hosted-compatible isolation smoke test',status:'FAIL',error:error.message});
+    await sql('rollback;');
+  }
 }
 console.log(JSON.stringify({mode:process.argv.includes('--baseline')?'baseline':'migration',passed:results.filter(r=>r.status==='PASS').length,failed:results.filter(r=>r.status==='FAIL').length,results},null,2));
 await db.close();
