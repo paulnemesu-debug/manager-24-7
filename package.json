@@ -10,7 +10,7 @@
   "license": "SEE LICENSE IN LICENSE-PROPRIETARY.md",
   "homepage": "https://www.paradim.ro",
   "main": "expo-router/entry",
-  "version": "1.6.4",
+  "version": "1.6.5",
   "dependencies": {
     "@expo-google-fonts/manrope": "^0.4.2",
     "@expo/ui": "~57.0.14",
@@ -80,7 +80,8 @@
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "qa:flows": "node scripts/qa/check-folders.cjs && node scripts/qa/check-draft-flows.cjs && node scripts/qa/check-auth-haccp.cjs && node scripts/qa/check-nutrition-flows.cjs && node scripts/qa/check-commercial-flows.cjs && node scripts/qa/check-operational-flows.cjs && node scripts/qa/check-operations-remediation.cjs"
+    "qa:flows": "node scripts/qa/check-folders.cjs && node scripts/qa/check-draft-flows.cjs && node scripts/qa/check-auth-haccp.cjs && node scripts/qa/check-nutrition-flows.cjs && node scripts/qa/check-commercial-flows.cjs && node scripts/qa/check-operational-flows.cjs && node scripts/qa/check-operations-remediation.cjs",
+    "qa:android-release": "node scripts/qa/check-android-release-artifact.cjs"
   },
   "private": true
 }

@@ -3,8 +3,8 @@ setlocal EnableExtensions EnableDelayedExpansion
 title Manager 24/7 by PARADIM - Build APK local
 cd /d "%~dp0"
 
-set "APP_VERSION=1.6.4"
-set "APK_OUTPUT=manager24-7-v1.6.4-local.apk"
+set "APP_VERSION=1.6.5"
+set "APK_OUTPUT=manager24-7-v1.6.5-local-test.apk"
 set "NODE_ENV=production"
 if not defined SENTRY_AUTH_TOKEN set "SENTRY_DISABLE_AUTO_UPLOAD=true"
 if not defined EXPO_PUBLIC_APP_ENV (

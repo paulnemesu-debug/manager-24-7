@@ -21,10 +21,12 @@ describe('Android release invariants', () => {
     const app = JSON.parse(read('app.json'));
     const pkg = JSON.parse(read('package.json'));
     const gradle = read('android/app/build.gradle');
-    expect(app.expo.version).toBe('1.6.4');
+    expect(app.expo.version).toBe('1.6.5');
     expect(pkg.version).toBe(app.expo.version);
-    expect(gradle).toContain('versionName "1.6.4"');
-    expect(gradle).toContain('versionCode 63');
+    expect(app.expo.android.package).toBe('ro.paradim.professionalfoodcost');
+    expect(gradle).toContain("applicationId 'ro.paradim.professionalfoodcost'");
+    expect(gradle).toContain('versionName "1.6.5"');
+    expect(gradle).toContain('versionCode 64');
   });
 
   it('uses the atomic recipe RPC and an unambiguous ingredient relation', () => {
@@ -79,9 +81,10 @@ describe('Android release invariants', () => {
     expect(script).toContain('ndk;27.1.12297006');
     expect(script).toContain('app:assembleRelease');
     expect(script).toContain('-PreactNativeArchitectures=arm64-v8a');
-    expect(script).toContain('manager24-7-v1.6.4-local.apk');
+    expect(script).toContain('manager24-7-v1.6.5-local-test.apk');
     expect(guide).toContain('nu consumă cota lunară');
     expect(guide).toContain('semnat cu cheia locală de test');
+    expect(guide).toContain('manager24-7-v1.6.5-local-test.apk');
     expect(gradle).toContain('hasLocalReleaseKeystore');
     expect(gradle).toContain("rootProject.file('keystore.properties')");
   });

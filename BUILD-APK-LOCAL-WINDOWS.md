@@ -46,7 +46,7 @@ Dublu-click pe `BUILD-APK-LOCAL-WINDOWS.bat`. Scriptul detectează Java și SDK-
 instalează componentele lipsă când `sdkmanager` este disponibil, rulează toate
 verificările și generează în rădăcina proiectului:
 
-`manager24-7-v1.6.4-local.apk`
+`manager24-7-v1.6.5-local-test.apk`
 
 Durata primei compilări depinde de calculator și de descărcarea componentelor
 Android. Scriptul păstrează cache-ul și reutilizează componentele deja compilate.
@@ -74,9 +74,20 @@ deoarece semnătura este diferită. În acest caz:
 
 1. salvează orice date locale nesincronizate;
 2. dezinstalează versiunea existentă `Manager 24/7`;
-3. instalează `manager24-7-v1.6.4-local.apk`.
+3. instalează `manager24-7-v1.6.5-local-test.apk`.
 
 Scriptul nu dezinstalează niciodată automat aplicația.
+
+Numele `local-test` este intenționat: acest fișier nu este un artefact de
+publicare. Un APK candidat pentru publicare se verifică separat, inclusiv
+semnătura, cu:
+
+```bat
+npm run qa:android-release -- C:\cale\catre\manager24-7-release.apk
+```
+
+Comanda acceptă numai pachetul `ro.paradim.professionalfoodcost`, versiunea
+`1.6.5`, codul `64` și certificatul de release aprobat.
 
 ## Folosirea aceleiași chei ca EAS (opțional)
 
