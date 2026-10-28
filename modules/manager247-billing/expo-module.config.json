@@ -1,0 +1,6 @@
+{
+  "platforms": ["android"],
+  "android": {
+    "modules": ["expo.modules.manager247billing.Manager247BillingModule"]
+  }
+}

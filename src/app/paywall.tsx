@@ -25,6 +25,7 @@ import { useI18n } from '@/contexts/locale-context';
 import { useSubscription } from '@/contexts/subscription-context';
 import { useBilling } from '@/hooks/use-billing';
 import type { TranslationKey } from '@/i18n/translations';
+import { restoreSubscriptionAccess } from '@/lib/subscription-restore';
 
 const benefitKeys: TranslationKey[] = [
   'paywall.benefit1',
@@ -66,8 +67,11 @@ export default function PaywallScreen() {
 
   const restore = async () => {
     try {
-      if (IS_PLAY_STORE_BUILD) await billing.restore();
-      await subscription.refresh();
+      await restoreSubscriptionAccess({
+        isPlayStoreBuild: IS_PLAY_STORE_BUILD,
+        restoreGooglePlay: billing.restore,
+        refreshExternalAccess: subscription.refresh,
+      });
     } catch (caught) {
       Alert.alert(
         t('paywall.restoreFailed'),

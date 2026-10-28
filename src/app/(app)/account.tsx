@@ -26,6 +26,7 @@ import { useBilling } from '@/hooks/use-billing';
 import { SUPPORTED_CURRENCIES } from '@/lib/format';
 import { exportAccountData } from '@/lib/account-export';
 import { AccountCleanupError } from '@/lib/account-deletion-cleanup';
+import { restoreSubscriptionAccess } from '@/lib/subscription-restore';
 import {
   addLocation,
   listLocations,
@@ -90,8 +91,11 @@ export default function AccountScreen() {
 
   const restore = async () => {
     try {
-      if (IS_PLAY_STORE_BUILD) await billing.restore();
-      await subscription.refresh();
+      await restoreSubscriptionAccess({
+        isPlayStoreBuild: IS_PLAY_STORE_BUILD,
+        restoreGooglePlay: billing.restore,
+        refreshExternalAccess: subscription.refresh,
+      });
       Alert.alert(t('account.restoreStartedTitle'), t('account.restoreStartedBody'));
     } catch (caught) {
       Alert.alert(
