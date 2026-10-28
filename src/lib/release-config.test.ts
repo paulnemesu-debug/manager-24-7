@@ -17,6 +17,22 @@ const root = fileURLToPath(new URL('../..', import.meta.url));
 const read = (path: string) => readFileSync(resolve(root, path), 'utf8');
 
 describe('Android release invariants', () => {
+  it('bootstraps the recipe schema before additive cloud migrations run', () => {
+    const migrationNames = readdirSync(resolve(root, 'supabase/migrations'))
+      .filter((name) => name.endsWith('.sql'))
+      .sort();
+    const bootstrap = read('supabase/migrations/20260826000000_initial_recipe_schema.sql');
+    const ownerIntegrity = read('supabase/migrations/20260826212000_catalog_owner_integrity.sql');
+
+    expect(migrationNames[0]).toBe('20260826000000_initial_recipe_schema.sql');
+    expect(bootstrap).toContain('create table if not exists public.recipes');
+    expect(bootstrap).toContain('create table if not exists public.recipe_ingredients');
+    expect(bootstrap).toContain('unique (id, user_id)');
+    expect(bootstrap).toContain('alter table public.recipes enable row level security');
+    expect(bootstrap).toContain('alter table public.recipe_ingredients enable row level security');
+    expect(ownerIntegrity).toContain('recipe_ingredients_catalog_owner_fk');
+  });
+
   it('keeps the app and native Android release versions aligned', () => {
     const app = JSON.parse(read('app.json'));
     const pkg = JSON.parse(read('package.json'));
