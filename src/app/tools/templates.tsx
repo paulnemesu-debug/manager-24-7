@@ -18,6 +18,7 @@ import { Brand, Fonts, Radius, TabularNumbers } from '@/constants/theme';
 import { useI18n } from '@/contexts/locale-context';
 import { usePreferences } from '@/contexts/preferences-context';
 import { foodcomCopy } from '@/lib/foodcom-catalog-copy';
+import { getTemplateNutritionReadiness } from '@/lib/nutrition-readiness';
 
 type Filter = RecipeCategory | 'all';
 
@@ -88,8 +89,12 @@ export default function RecipeTemplatesScreen() {
 
       <Text style={styles.resultCount}>{t('templates.results', { count: visible.length })}</Text>
       {visible.map((template) => {
-        const nutritionRows = template.ingredients.filter((item) => item.energyKcalPer100g !== null).length;
-        const hasMissingEnergy = nutritionRows !== template.ingredients.length;
+        const nutrition = getTemplateNutritionReadiness(template);
+        const nutritionLabel = nutrition.status === 'complete'
+          ? t('templates.nutritionComplete')
+          : nutrition.status === 'partial'
+            ? t('templates.nutritionPartial', { count: nutrition.available, total: nutrition.total })
+            : t('templates.nutritionEmpty');
         return (
           <Pressable
             key={template.id}
@@ -112,8 +117,8 @@ export default function RecipeTemplatesScreen() {
                 </Text>
               </View>
               <StatusPill
-                label={hasMissingEnergy ? t('templates.energyPartial') : t('templates.energyImported')}
-                status={hasMissingEnergy ? 'watch' : 'neutral'}
+                label={nutritionLabel}
+                status={nutrition.status === 'complete' ? 'healthy' : nutrition.status === 'partial' ? 'watch' : 'critical'}
               />
               <View style={styles.useRow}>
                 <Ionicons name="create-outline" size={16} color={Brand.navy} />

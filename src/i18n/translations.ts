@@ -514,6 +514,9 @@ const ro = {
   'templates.portion': 'porție',
   'templates.energyImported': 'Energia din Excel a fost importată',
   'templates.energyPartial': 'Energie incompletă în sursă',
+  'templates.nutritionComplete': 'Date nutriționale complete · 9/9',
+  'templates.nutritionPartial': 'Date nutriționale parțiale · {count}/{total}',
+  'templates.nutritionEmpty': 'Date nutriționale lipsă · 0/9',
   'templates.use': 'Folosește și editează',
   'templates.useNamed': 'Folosește modelul {title}',
 
@@ -1722,6 +1725,9 @@ const en: Record<TranslationKey, string> = {
   'templates.portion': 'portion',
   'templates.energyImported': 'Workbook energy imported',
   'templates.energyPartial': 'Energy incomplete in source',
+  'templates.nutritionComplete': 'Complete nutrition data · 9/9',
+  'templates.nutritionPartial': 'Partial nutrition data · {count}/{total}',
+  'templates.nutritionEmpty': 'Nutrition data missing · 0/9',
   'templates.use': 'Use and edit',
   'templates.useNamed': 'Use template {title}',
 
