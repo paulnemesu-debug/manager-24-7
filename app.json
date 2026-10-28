@@ -97,7 +97,8 @@
       "expo-image",
       "expo-web-browser",
       "./plugins/with-android-release",
-      "expo-sqlite"
+      "expo-sqlite",
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true
