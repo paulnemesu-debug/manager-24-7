@@ -1,7 +1,18 @@
 // Management credentials stay in the operator's environment, never in the app or ZIP.
 import { readFile } from 'node:fs/promises';
 
-const project = 'mnaaibsmijziutxuluvv';
+const productionProject = 'mnaaibsmijziutxuluvv';
+const projectArgument = process.argv.indexOf('--project-ref');
+const project = (projectArgument >= 0 ? process.argv[projectArgument + 1] : process.env.SUPABASE_PROJECT_REF)?.trim();
+const allowProduction = process.argv.includes('--allow-production');
+if (!project || !/^[a-z]{20}$/.test(project)) {
+  console.error('missing_or_invalid_project_ref: foloseste --project-ref <ref-staging>.');
+  process.exit(1);
+}
+if (project === productionProject && !allowProduction) {
+  console.error('production_requires_allow_production: refuz modificarea productiei fara --allow-production.');
+  process.exit(1);
+}
 const token = process.env.SUPABASE_ACCESS_TOKEN?.trim();
 const apply = process.argv.includes('--apply');
 if (!token) {

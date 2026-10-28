@@ -86,6 +86,44 @@ describe('Android release invariants', () => {
     expect(gradle).toContain("rootProject.file('keystore.properties')");
   });
 
+  it('keeps staging and production backend coordinates provider-managed and isolated', () => {
+    const eas = JSON.parse(read('eas.json'));
+    const profiles = eas.build as Record<string, {
+      env: Record<string, string>;
+      android?: Record<string, string>;
+    }>;
+
+    expect(profiles.development.env.EXPO_PUBLIC_APP_ENV).toBe('development');
+    expect(profiles.preview.env.EXPO_PUBLIC_APP_ENV).toBe('staging');
+    for (const profile of ['production', 'production-apk', 'production-ios']) {
+      expect(profiles[profile].env.EXPO_PUBLIC_APP_ENV).toBe('production');
+    }
+    for (const profile of Object.values(profiles)) {
+      expect(profile.env).not.toHaveProperty('EXPO_PUBLIC_SUPABASE_URL');
+      expect(profile.env).not.toHaveProperty('EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY');
+    }
+    expect(profiles.production.android?.credentialsSource).toBe('remote');
+    expect(profiles['production-apk'].android?.credentialsSource).toBe('remote');
+
+    const stagingExample = read('.env.example');
+    expect(stagingExample).toContain('EXPO_PUBLIC_APP_ENV=staging');
+    expect(stagingExample).toContain('<staging-project-ref>');
+    expect(stagingExample).not.toContain('mnaaibsmijziutxuluvv');
+
+    const productionChecklist = read('ENV-PRODUCTION-EXAMPLE.txt');
+    expect(productionChecklist).toContain('EXPO_PUBLIC_APP_ENV=<configured-in-eas>');
+    expect(productionChecklist).toContain('EXPO_PUBLIC_SUPABASE_URL=<configured-in-eas>');
+    expect(productionChecklist).toContain('EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<configured-in-eas>');
+    expect(productionChecklist).not.toContain('sb_publishable_');
+  });
+
+  it('requires an explicit OTP project and a separate production override', () => {
+    const script = read('scripts/configure-email-otp.mjs');
+    expect(script).toContain("process.argv.includes('--allow-production')");
+    expect(script).toContain('production_requires_allow_production');
+    expect(script).toContain('--project-ref');
+  });
+
   it('keeps the first screen compact and splits the editor into four practical tabs', () => {
     const signIn = read('src/app/sign-in.tsx');
     const editor = read('src/components/recipe-editor.tsx');

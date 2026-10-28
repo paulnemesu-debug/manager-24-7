@@ -24,6 +24,22 @@ Scriptul limitează compilarea la un lucrător și rulează Kotlin în procesul
 Gradle, pentru a reduce consumul de memorie. Închide emulatorul și evită alte
 compilări simultane pe un calculator cu 8 GB RAM.
 
+## Configurarea mediului aplicației
+
+Scriptul nu conține coordonate Supabase. În aceeași fereastră Command Prompt,
+configurează mediul țintă înainte de rulare, folosind valorile păstrate în
+mediul EAS corespunzător. Pentru un APK de verificare folosește proiectul de
+staging; nu copia aici coordonatele producției:
+
+```bat
+set EXPO_PUBLIC_APP_ENV=staging
+set EXPO_PUBLIC_SUPABASE_URL=https://<staging-project-ref>.supabase.co
+set EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<staging-publishable-key>
+BUILD-APK-LOCAL-WINDOWS.bat
+```
+
+Valorile nu sunt afișate de script și nu trebuie salvate în fișiere urmărite de Git.
+
 ## Generare
 
 Dublu-click pe `BUILD-APK-LOCAL-WINDOWS.bat`. Scriptul detectează Java și SDK-ul,

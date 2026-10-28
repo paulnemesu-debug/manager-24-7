@@ -7,8 +7,18 @@ set "APP_VERSION=1.6.4"
 set "APK_OUTPUT=manager24-7-v1.6.4-local.apk"
 set "NODE_ENV=production"
 if not defined SENTRY_AUTH_TOKEN set "SENTRY_DISABLE_AUTO_UPLOAD=true"
-set "EXPO_PUBLIC_SUPABASE_URL=https://mnaaibsmijziutxuluvv.supabase.co"
-set "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_FUZ97amKl15vIFXyjyfeaQ_kXLiknqY"
+if not defined EXPO_PUBLIC_APP_ENV (
+  echo EROARE: lipseste EXPO_PUBLIC_APP_ENV ^(development, staging sau production^).
+  goto :failed
+)
+if not defined EXPO_PUBLIC_SUPABASE_URL (
+  echo EROARE: lipseste EXPO_PUBLIC_SUPABASE_URL din mediul local securizat.
+  goto :failed
+)
+if not defined EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY (
+  echo EROARE: lipseste EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY din mediul local securizat.
+  goto :failed
+)
 set "EXPO_PUBLIC_GOOGLE_PLAY_SUBSCRIPTION_ID=professional_foodcost_pro"
 set "EXPO_PUBLIC_DISTRIBUTION_CHANNEL=direct"
 set "EXPO_PUBLIC_DEMO_MODE=false"
