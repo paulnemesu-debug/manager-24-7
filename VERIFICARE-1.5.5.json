@@ -1,0 +1,326 @@
+{
+  "version": "1.5.5",
+  "date": "2026-10-04",
+  "generated_at": "2026-10-04T16:15:37.874786+00:00",
+  "android_version_code": 59,
+  "ios_build_number": 30,
+  "automated_tests": {
+    "passed": 376,
+    "failed": 0,
+    "files": 61,
+    "report": "qa-results/tests-155.json"
+  },
+  "component_scenarios": {
+    "passed": 47,
+    "groups": {
+      "folders": 6,
+      "drafts_photos": 9,
+      "auth_haccp": 11,
+      "nutrition": 8,
+      "commercial": 13
+    },
+    "native_and_service_adapters": true,
+    "physical_device": false
+  },
+  "checks": {
+    "typecheck": "passed",
+    "lint": "passed",
+    "expo_dependency_check": "passed using local SDK metadata; offline-mode warning",
+    "android_hermes_export": {
+      "status": "passed",
+      "platform": "android",
+      "files": [
+        {
+          "file": "entry-bd712fadead149a8af61debe891887b1.hbc",
+          "bytes": 8342168,
+          "sha256": "74a861733fb15cd5a32773f1c5e0da61e9e0f2ae3cec131990352b94b8a4200c"
+        },
+        {
+          "file": "entry-bd712fadead149a8af61debe891887b1.hbc.map",
+          "bytes": 17349543,
+          "sha256": "536d9d98ce85ff652d00980ee5e357e9e46ef8e7474eab6c04550914495a86b0"
+        }
+      ]
+    },
+    "xlsx_written_and_reopened": true,
+    "pdf_export_content_generated": true,
+    "actual_native_pdf_rendering": false,
+    "physical_android_devices": 0,
+    "native_release_configuration": "26 checks passed",
+    "crash_release_configuration": {
+      "passed": 2,
+      "native_ingestion_verified": false,
+      "report": "qa-results/crash-release-checks.json"
+    },
+    "verification_pdf": {
+      "status": "passed",
+      "pages": 4,
+      "all_pages_visually_inspected": true,
+      "text_and_horizontal_bounds_checked": true,
+      "draft_status_removed": true,
+      "file": "manager24-7-v1.5.5-verificare.pdf"
+    }
+  },
+  "nutrition": {
+    "database": "ANSES-Ciqual 2025",
+    "source_url": "https://doi.org/10.57745/RDMHWY",
+    "licence": "Etalab Open Licence 2.0",
+    "foods": 3484,
+    "nutrients": 9,
+    "local_data_bytes": 494793,
+    "data_and_local_calculation_subscription_cost": 0,
+    "data_sha256": "ae7b02c1110fcabeda0643ecc9933c374354c38809263399f5452416901e509e",
+    "coverage": {
+      "recipes": 479,
+      "rows": 4102,
+      "automatic_rows": 3704,
+      "complete_rows": 3600,
+      "recipes_with_all_required_values": 160,
+      "recipes_with_all_nine_values": 160,
+      "recipes_with_value_per_portion": {
+        "energyKj": 461,
+        "energyKcal": 461,
+        "fat": 210,
+        "saturates": 189,
+        "carbohydrates": 210,
+        "sugars": 175,
+        "fibre": 210,
+        "protein": 210,
+        "salt": 210
+      },
+      "localized_foods": 244,
+      "exact_aliases": 938,
+      "estimated_aliases": 12,
+      "source_missing_values": [
+        [
+          "cimbru proaspat",
+          48
+        ],
+        [
+          "pulpa porc",
+          19
+        ],
+        [
+          "malai",
+          10
+        ],
+        [
+          "rozmarin proaspat",
+          9
+        ],
+        [
+          "rosii uscate",
+          6
+        ],
+        [
+          "coriandru boabe",
+          4
+        ],
+        [
+          "fasole alba uscata",
+          3
+        ],
+        [
+          "capere",
+          2
+        ],
+        [
+          "amidon cartofi",
+          1
+        ],
+        [
+          "coriandru macinat",
+          1
+        ],
+        [
+          "quinoa",
+          1
+        ]
+      ],
+      "explanation": "Numeric coverage only; generic-source values and cooked weight estimates require review. Missing nutrients never become zero."
+    },
+    "previous_full_numeric_recipes": 110,
+    "added_exact_aliases": 83,
+    "generic_aliases_unconfirmed": 12,
+    "automatic_values_on_final_recipe": true,
+    "manual_label_precedence": true,
+    "unknown_values_preserved_as_null": true,
+    "cooking_retention_model": false,
+    "numeric_coverage_is_certified_precision": false,
+    "coverage_details": "qa-results/nutrition-coverage.json"
+  },
+  "dependencies": {
+    "expo": "57.0.26",
+    "sentry_react_native": "7.11.0",
+    "react_native": "0.86.3",
+    "audit": {
+      "info": 0,
+      "low": 0,
+      "moderate": 12,
+      "high": 21,
+      "critical": 0,
+      "total": 33
+    },
+    "audit_force_applied": false,
+    "evidence": "qa-results/validation-1.5.5/npm-audit.json"
+  },
+  "features": {
+    "ingredient_simulator": {
+      "implemented": true,
+      "quantity_price_supplier": true,
+      "mutates_saved_recipe": false,
+      "screen_adapter_checks": true
+    },
+    "price_alerts": {
+      "implemented": true,
+      "nested_subrecipes": true,
+      "actual_target_crossing": true,
+      "combined_price_decreases_considered": true,
+      "manual_catalog_price_changes_recorded": true,
+      "cloud_price_history_existing": true,
+      "offline_price_history_added": false
+    },
+    "invoice_import": {
+      "implemented": true,
+      "mandatory_selected_rows_and_review": true,
+      "edits_invalidate_review": true,
+      "negative_prices_blocked": true,
+      "foreign_currency_blocked": true,
+      "manual_product_mapping": true,
+      "offline_supplier_mapping_reconciliation": true,
+      "actual_ocr_tested": false,
+      "multi_phase_import_verified_atomic": false
+    },
+    "menu_engineering": {
+      "recorded_sales_only": true,
+      "maximum_actions": 3,
+      "actions_link_to_recipe_simulation": true,
+      "romanian_portions_header_recognized": true,
+      "offline_sales_reconciliation": true,
+      "action_impact_is_forecast": false
+    },
+    "crash_reporting": {
+      "sdk_integrated": true,
+      "native_sdk_enabled_outside_expo_go": true,
+      "configured_dsn": false,
+      "active_without_dsn": false,
+      "javascript_payload_filter_tested": true,
+      "native_ingestion_verified": false,
+      "early_pre_javascript_crashes_verified": false,
+      "setup": "SENTRY-SETUP.md",
+      "sdk_verified_in_native_apk": true,
+      "android_release": "ro.paradim.professionalfoodcost@1.5.5+59",
+      "android_dist": "59",
+      "ios_release": "ro.paradim.manager247@1.5.5+30",
+      "ios_dist": "30",
+      "source_maps_uploaded": false
+    },
+    "payments": {
+      "direct_distribution": "external checkout; real transaction not tested",
+      "google_play_native_billing": "disabled adapter, configured=false",
+      "real_charge_executed": false
+    },
+    "android_prebuild": {
+      "preserve_opaque_startup_theme": true,
+      "preserve_camera_permission": true,
+      "preserve_gradle_signing_configuration": true,
+      "plugin": "plugins/with-android-release.js"
+    }
+  },
+  "production_services": {
+    "changed_in_this_update": false,
+    "new_database_migration_required": false,
+    "scanner": {
+      "name": "scan-consumption-document",
+      "status": "ACTIVE",
+      "version": 3,
+      "verify_jwt": true,
+      "auth_professional_access_and_atomic_quota_reviewed": true,
+      "positive_ocr": false,
+      "live_negative_checks": [
+        {
+          "name": "Missing authentication",
+          "status": 401,
+          "body": "{\"code\":\"UNAUTHORIZED_NO_AUTH_HEADER\",\"message\":\"Missing authorization header\"}",
+          "passed": true
+        },
+        {
+          "name": "Invalid token",
+          "status": 401,
+          "body": "{\"code\":\"UNAUTHORIZED_INVALID_JWT_FORMAT\",\"message\":\"Invalid JWT\"}",
+          "passed": true
+        }
+      ],
+      "default_anthropic_model_in_source": "claude-sonnet-4-5",
+      "deployed_model_secret_verified": false
+    },
+    "rls_reviewed_enabled": [
+      "ingredient_price_history",
+      "ingredient_supplier_offers",
+      "menu_sales",
+      "supplier_product_mappings"
+    ],
+    "real_otp_delivery": "not tested",
+    "real_payment": "not tested",
+    "account_deletion": "not executed",
+    "live_recipe_photo_upload": "not tested"
+  },
+  "android_apk": {
+    "status": "built_and_package_validated",
+    "full_gradle_build": true,
+    "gradle_exit_code": 0,
+    "java": 17,
+    "gradle": "9.3.1",
+    "sdk": 36,
+    "build_tools": "36.0.0",
+    "ndk": "27.1.12297006",
+    "installed_on_device": false,
+    "old_apk_repackaged": false,
+    "architecture": "arm64-v8a",
+    "file": "manager24-7-v1.5.5-build59.apk",
+    "bytes": 47360792,
+    "sha256": "cfe938924a61a9e16af4fef0e235ac3bcc1b8e0dcefd65a2045b42ef55ed3d78",
+    "package": "ro.paradim.professionalfoodcost",
+    "version_name": "1.5.5",
+    "version_code": 59,
+    "signature_valid": true,
+    "signature_scheme": "v2",
+    "signing": "public debug/test key",
+    "signing_certificate_sha256": "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+    "matches_previous_154_test_certificate": true,
+    "zip_crc_verified": true,
+    "zip_and_elf_16kb_alignment": true,
+    "native_libraries": 27,
+    "sentry_native_libraries": [
+      "lib/arm64-v8a/libsentry-android.so",
+      "lib/arm64-v8a/libsentry.so"
+    ],
+    "sentry_java_bridge_present": true,
+    "latest_javascript_bundle_verified": true,
+    "native_bundle_sha256": "f0e3f42b518db44283c33ff290245b68b33295ef2ebcb87eca3ffc5ec1f17b92",
+    "native_source_map_sha256": "4235d4a64482969e4129a914bad66c882d518d681e4d8e08ad8a2bd61d20e83c",
+    "native_lint_vital_skipped": false,
+    "sentry_source_map_upload": "skipped; no project/token configured",
+    "evidence": "qa-results/validation-1.5.5/apk-checks.json",
+    "gradle_log": "qa-results/validation-1.5.5/native-build-complete.log"
+  },
+  "limits": [
+    "No physical phone or Android Studio UI is connected to this cloud workspace.",
+    "Native PDF rendering, camera hardware, real OTP, paid checkout and signed photo upload have not been tested.",
+    "Sentry needs the project DSN, source maps upload credentials and a real native crash test.",
+    "Nutrition completion is numeric and may use explicitly unconfirmed generic assumptions.",
+    "Google Play native purchase and restore are disabled in the current snapshot."
+  ],
+  "evidence": [
+    "qa-results/tests-155.json",
+    "qa-results/commercial-flow-checks.json",
+    "qa-results/auth-haccp-checks.json",
+    "qa-results/folder-checks.json",
+    "qa-results/draft-flow-checks.json",
+    "qa-results/nutrition-flow-checks.json",
+    "qa-results/live-scan-guards.json",
+    "qa-results/nutrition-coverage.json",
+    "qa-results/validation-1.5.5/",
+    "qa-results/crash-release-checks.json"
+  ]
+}

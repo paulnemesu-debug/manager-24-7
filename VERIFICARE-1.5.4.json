@@ -1,0 +1,125 @@
+{
+  "version": "1.5.4",
+  "date": "2026-10-04",
+  "android_version_code": 58,
+  "ios_build_number": 29,
+  "automated_tests": {
+    "passed": 360,
+    "failed": 0,
+    "files": 57,
+    "report": "qa-results/tests.json"
+  },
+  "component_scenarios": {
+    "passed": 34,
+    "groups": {
+      "folders": 6,
+      "drafts_photos": 9,
+      "auth_haccp": 11,
+      "nutrition": 8
+    },
+    "native_and_service_adapters": true,
+    "physical_device": false
+  },
+  "checks": {
+    "typecheck": "passed",
+    "lint": "passed (0 warnings)",
+    "local_nutrition_network_calls": 0,
+    "xlsx_written_and_reopened": true,
+    "pdf_export_content_generated": true,
+    "actual_native_pdf_rendering": false,
+    "hermes_bytecode_disassembled": true
+  },
+  "nutrition": {
+    "database": "ANSES-Ciqual 2025",
+    "release_date": "2025-11-19",
+    "source_url": "https://doi.org/10.57745/RDMHWY",
+    "licence": "Etalab Open Licence 2.0",
+    "foods": 3484,
+    "nutrients": 9,
+    "local_data_bytes": 494793,
+    "data_and_local_calculation_subscription_cost": 0,
+    "source_workbook_md5": "0d9758ce23f3f13dd63a005bc1bb4f2c",
+    "data_sha256": "ae7b02c1110fcabeda0643ecc9933c374354c38809263399f5452416901e509e",
+    "coverage": {
+      "recipes": 479,
+      "rows": 4102,
+      "automatic_rows": 3505,
+      "complete_rows": 3402,
+      "recipes_with_all_required_values": 110,
+      "recipes_with_all_nine_values": 110,
+      "recipes_with_value_per_portion": {
+        "energyKj": 461,
+        "energyKcal": 461,
+        "fat": 143,
+        "saturates": 129,
+        "carbohydrates": 143,
+        "sugars": 119,
+        "fibre": 143,
+        "protein": 143,
+        "salt": 143
+      },
+      "localized_foods": 228,
+      "exact_aliases": 855,
+      "explanation": "Numeric coverage only; generic-source values and cooked weight estimates require review. Missing nutrients never become zero."
+    },
+    "coverage_details": "qa-results/nutrition-coverage.json",
+    "automatic_values_on_final_recipe": true,
+    "manual_label_precedence": true,
+    "unknown_values_preserved_as_null": true,
+    "source_qualifiers_retained": true,
+    "cooking_retention_model": false
+  },
+  "android_apk": {
+    "version": "1.5.4",
+    "android_version_code": 58,
+    "bytes": 52245562,
+    "sha256": "22a78d116ac3e7d9ba5e06f6043282ca4c777d0587d37bc0345d43dc9a2d1ddd",
+    "zip_integrity": true,
+    "manifest_config_consistent": true,
+    "compiled_local_nutrition_data": true,
+    "only_changed_entries": [
+      "AndroidManifest.xml",
+      "assets/app.config",
+      "assets/index.android.bundle"
+    ],
+    "added_signing_entries": [
+      "META-INF/ANDROIDD.RSA",
+      "META-INF/ANDROIDD.SF",
+      "META-INF/MANIFEST.MF"
+    ],
+    "hermes_bytecode_version": 98,
+    "native_resources_preserved": true,
+    "native_library_count": 25,
+    "zip_and_elf_16kb_alignment": true,
+    "signatures": {
+      "v2": true,
+      "v3": true,
+      "debug_test_certificate": true
+    },
+    "full_gradle_build": false,
+    "installed_on_device": false
+  },
+  "production_services": {
+    "changed_in_this_update": false,
+    "new_database_migration_required_for_nutrition": false,
+    "real_otp_delivery": "not tested",
+    "actual_scan_ai": "not tested",
+    "actual_payments": "not tested",
+    "account_deletion": "not executed"
+  },
+  "limits": [
+    "No physical Android device, emulator or Android Studio was available.",
+    "No full Gradle build; native libraries/resources retained from 1.5.3.",
+    "Browser visual interaction was not confirmed.",
+    "Ingredients without complete source data need association or label values.",
+    "Cooked weight estimates and source bounds are explicitly approximate.",
+    "Server state and pending atomic photo migration are unchanged; see RELEASE-1.5.3.md."
+  ],
+  "evidence": [
+    "qa-results/nutrition-flow-checks.json",
+    "qa-results/export-evidence/nutrition-automatic.json",
+    "qa-results/export-evidence/nutrition-automatic.html",
+    "qa-results/export-evidence/nutrition-automatic.xlsx",
+    "qa-results/validation-1.5.4/"
+  ]
+}

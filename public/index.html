@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ro">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover" />
+
+    <title>Manager 24/7 by PARADIM</title>
+    <meta name="description" content="Costuri clare. Profit controlat. Calculul food cost pentru restaurante." />
+    <meta name="theme-color" content="#062544" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Manager 24/7" />
+    <link rel="apple-touch-icon" href="/icons/manager247-app-icon.png" />
+    <link rel="icon" href="/icons/manager247-app-icon.png" />
+
+    <meta property="og:title" content="Manager 24/7 by PARADIM" />
+    <meta property="og:description" content="Costuri clare. Profit controlat." />
+    <meta property="og:type" content="website" />
+
+    <style id="expo-reset">
+      html, body { height: 100%; background-color: #F7F5EF; }
+      body { overflow: hidden; overscroll-behavior-y: none; }
+      #root { display: flex; height: 100%; flex: 1; }
+    </style>
+  </head>
+  <body>
+    <noscript>Această aplicație are nevoie de JavaScript activat.</noscript>
+    <div id="root"></div>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('/sw.js').catch(function () {});
+        });
+      }
+    </script>
+  </body>
+</html>

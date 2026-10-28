@@ -1,0 +1,66 @@
+{
+  "version": "1.5.2",
+  "android_version_code": 56,
+  "verified_on": "2026-10-04",
+  "automated_tests": {
+    "files_passed": 49,
+    "tests_passed": 281,
+    "tests_failed": 0
+  },
+  "typescript": "passed",
+  "lint": "passed_without_warnings",
+  "apk_signature_schemes": [
+    "v2",
+    "v3"
+  ],
+  "signer_sha256": "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+  "signer_matches_v1_5_1": true,
+  "zip_integrity": "passed",
+  "hermes_bytecode": "verified",
+  "native_libraries_16kb_aligned": 25,
+  "unchanged_assets_verified": 53,
+  "native_code": "preserved from v1.5.1 APK; JavaScript bundle recompiled",
+  "automatic_visual_verification": "not_run",
+  "interactive_navigation": {
+    "checks_passed": 4,
+    "checks": [
+      "isolated folder pages and distinct icons",
+      "form state retained across closing and switching",
+      "Android back handler closes and cleans up",
+      "saving redirects to My recipes even for the same folder"
+    ],
+    "renderer": "React test renderer with native adapters",
+    "physical_device": false
+  },
+  "draft_editor_flows": {
+    "checks_passed": 5,
+    "checks": [
+      "typing persists a new draft and reopening restores the title",
+      "My recipes resumes the matching local draft",
+      "opening a completed recipe without edits creates no pending draft",
+      "a failed conflicting save retains the draft and refreshes cloud data",
+      "comparison confirmation rebases the save, clears the draft and returns to My recipes"
+    ],
+    "renderer": "React test renderer using actual editor, recipe list and draft storage",
+    "native_adapters": true,
+    "physical_device": false
+  },
+  "full_native_build": {
+    "status": "blocked",
+    "reason": "Gradle distribution download: network unreachable / timed out",
+    "gradle": "9.3.1"
+  },
+  "physical_device_installation_and_end_to_end_login": "not_tested",
+  "server_checks": {
+    "public_key_only_scan": 401,
+    "public_key_as_bearer_scan": 401,
+    "hr_deletion_markers": "passed_rolled_back",
+    "daily_and_burst_scan_quota": "passed_rolled_back",
+    "recipe_conflict_and_atomicity": "passed_rolled_back",
+    "ingredient_cost_precision": "passed_rolled_back"
+  },
+  "scanner_provider_activation": "ANTHROPIC_API_KEY missing; real invoice scan not tested",
+  "javascript_error_reporting": "own-account Supabase product_events; no native crash coverage",
+  "apk_sha256": "ebd5f96a642d26718c0e12580590dd45689ad777bd44d9cef244e29979837dbe",
+  "apk_bytes": 51434355
+}

@@ -1,0 +1,19 @@
+{
+  "name": "Manager 24/7 by PARADIM",
+  "short_name": "Manager 24/7",
+  "description": "Costuri, producție și conformitate HACCP pentru HoReCa.",
+  "lang": "ro",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "portrait",
+  "background_color": "#F7F5EF",
+  "theme_color": "#062544",
+  "categories": ["business", "food", "productivity"],
+  "icons": [
+    { "src": "/icons/manager247-app-icon.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
