@@ -1,7 +1,6 @@
 # Păstrăm proiectul Android în arhiva EAS: acesta conține protecția nativă
 # împotriva ferestrei transparente pe Samsung/Android 16.
 node_modules/
-package-lock.json
 .expo/
 .cxx/
 dist/

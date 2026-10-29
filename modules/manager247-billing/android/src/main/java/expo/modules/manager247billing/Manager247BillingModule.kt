@@ -28,6 +28,7 @@ class Manager247BillingModule : Module(), PurchasesUpdatedListener {
   )
 
   private val connectionLock = Any()
+  private val purchaseLock = Any()
   private val connectionTasks = mutableListOf<ConnectionTask>()
   private var billingClient: BillingClient? = null
   private var isConnecting = false
@@ -47,17 +48,7 @@ class Manager247BillingModule : Module(), PurchasesUpdatedListener {
           queryProductDetails(
             client,
             productId,
-            onSuccess = { details ->
-              queryOwnedPurchases(
-                client,
-                productId,
-                onSuccess = { purchases ->
-                  purchases.forEach(::emitPurchaseUpdate)
-                  promise.resolve(productMap(details))
-                },
-                onFailure = { code -> rejectBilling(promise, "connect.restore", code) },
-              )
-            },
+            onSuccess = { details -> promise.resolve(productMap(details)) },
             onFailure = { code -> rejectBilling(promise, "connect.product", code) },
           )
         },
@@ -75,7 +66,7 @@ class Manager247BillingModule : Module(), PurchasesUpdatedListener {
         reject(promise, "purchase", "Incomplete purchase request")
         return@AsyncFunction
       }
-      if (activePurchase != null) {
+      if (!reservePurchase(productId, promise)) {
         reject(promise, "purchase", "Another billing flow is already active")
         return@AsyncFunction
       }
@@ -85,15 +76,20 @@ class Manager247BillingModule : Module(), PurchasesUpdatedListener {
             client,
             productId,
             onSuccess = { details ->
+              if (!isActivePurchase(promise)) return@queryProductDetails
               val eligibleOffer = details.subscriptionOfferDetails
                 ?.firstOrNull { it.offerToken == offerToken }
               if (eligibleOffer == null) {
-                reject(promise, "purchase.offer", "The selected offer is no longer available")
+                failActivePurchase(
+                  productId,
+                  BillingClient.BillingResponseCode.ITEM_UNAVAILABLE,
+                  promise,
+                )
                 return@queryProductDetails
               }
               val activity = appContext.currentActivity
               if (activity == null) {
-                reject(promise, "purchase.activity", "No foreground Android activity")
+                failActivePurchase(productId, BillingClient.BillingResponseCode.ERROR, promise)
                 return@queryProductDetails
               }
               val productParams = BillingFlowParams.ProductDetailsParams.newBuilder()
@@ -105,24 +101,30 @@ class Manager247BillingModule : Module(), PurchasesUpdatedListener {
                 .setObfuscatedAccountId(sha256(userId))
                 .build()
 
-              activePurchase = ActivePurchase(productId, promise)
               activity.runOnUiThread {
-                val result = client.launchBillingFlow(activity, flowParams)
-                if (result.responseCode != BillingClient.BillingResponseCode.OK) {
-                  when (result.responseCode) {
-                    BillingClient.BillingResponseCode.USER_CANCELED -> resolveCancellation(productId)
-                    BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED -> {
-                      resolveOwnedPurchase(client, productId)
+                if (!isActivePurchase(promise)) return@runOnUiThread
+                try {
+                  val result = client.launchBillingFlow(activity, flowParams)
+                  if (result.responseCode != BillingClient.BillingResponseCode.OK) {
+                    when (result.responseCode) {
+                      BillingClient.BillingResponseCode.USER_CANCELED -> {
+                        resolveCancellation(productId, promise)
+                      }
+                      BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED -> {
+                        resolveOwnedPurchase(client, productId, promise)
+                      }
+                      else -> failActivePurchase(productId, result.responseCode, promise)
                     }
-                    else -> failActivePurchase(productId, result.responseCode)
                   }
+                } catch (_: Throwable) {
+                  failActivePurchase(productId, BillingClient.BillingResponseCode.ERROR, promise)
                 }
               }
             },
-            onFailure = { code -> rejectBilling(promise, "purchase.product", code) },
+            onFailure = { code -> failActivePurchase(productId, code, promise) },
           )
         },
-        onFailure = { code -> rejectBilling(promise, "purchase.connect", code) },
+        onFailure = { code -> failActivePurchase(productId, code, promise) },
       )
     }
 
@@ -154,13 +156,13 @@ class Manager247BillingModule : Module(), PurchasesUpdatedListener {
   }
 
   override fun onPurchasesUpdated(result: BillingResult, purchases: MutableList<Purchase>?) {
-    val active = activePurchase
+    val active = snapshotActivePurchase()
     if (result.responseCode == BillingClient.BillingResponseCode.USER_CANCELED) {
-      active?.let { resolveCancellation(it.productId) }
+      active?.let { resolveCancellation(it.productId, it.promise) }
       return
     }
     if (result.responseCode != BillingClient.BillingResponseCode.OK) {
-      active?.let { failActivePurchase(it.productId, result.responseCode) }
+      active?.let { failActivePurchase(it.productId, result.responseCode, it.promise) }
       return
     }
 
@@ -168,9 +170,16 @@ class Manager247BillingModule : Module(), PurchasesUpdatedListener {
     val matching = active?.let { current ->
       received.firstOrNull { current.productId in it.products }
     }
-    if (active != null && matching != null) {
-      activePurchase = null
-      active.promise.resolve(purchaseMap(matching))
+    if (active != null) {
+      if (matching != null) {
+        takeActivePurchase(active.productId, active.promise)?.promise?.resolve(purchaseMap(matching))
+      } else {
+        failActivePurchase(
+          active.productId,
+          BillingClient.BillingResponseCode.ERROR,
+          active.promise,
+        )
+      }
     }
     received.filterNot { it === matching }.forEach(::emitPurchaseUpdate)
   }
@@ -278,28 +287,61 @@ class Manager247BillingModule : Module(), PurchasesUpdatedListener {
     }
   }
 
-  private fun resolveOwnedPurchase(client: BillingClient, productId: String) {
+  private fun resolveOwnedPurchase(
+    client: BillingClient,
+    productId: String,
+    expectedPromise: Promise,
+  ) {
     queryOwnedPurchases(
       client,
       productId,
       onSuccess = { purchases ->
-        val active = activePurchase
         val purchase = purchases.firstOrNull()
-        if (active?.productId == productId && purchase != null) {
-          activePurchase = null
-          active.promise.resolve(purchaseMap(purchase))
+        if (purchase != null) {
+          takeActivePurchase(productId, expectedPromise)?.promise?.resolve(purchaseMap(purchase))
         } else {
-          failActivePurchase(productId, BillingClient.BillingResponseCode.ITEM_NOT_OWNED)
+          failActivePurchase(
+            productId,
+            BillingClient.BillingResponseCode.ITEM_NOT_OWNED,
+            expectedPromise,
+          )
         }
       },
-      onFailure = { code -> failActivePurchase(productId, code) },
+      onFailure = { code -> failActivePurchase(productId, code, expectedPromise) },
     )
   }
 
-  private fun resolveCancellation(productId: String) {
-    val active = activePurchase ?: return
-    if (active.productId != productId) return
-    activePurchase = null
+  private fun reservePurchase(productId: String, promise: Promise): Boolean =
+    synchronized(purchaseLock) {
+      if (activePurchase != null) false
+      else {
+        activePurchase = ActivePurchase(productId, promise)
+        true
+      }
+    }
+
+  private fun snapshotActivePurchase(): ActivePurchase? = synchronized(purchaseLock) {
+    activePurchase
+  }
+
+  private fun isActivePurchase(promise: Promise): Boolean = synchronized(purchaseLock) {
+    activePurchase?.promise === promise
+  }
+
+  private fun takeActivePurchase(
+    productId: String? = null,
+    expectedPromise: Promise? = null,
+  ): ActivePurchase? =
+    synchronized(purchaseLock) {
+      val active = activePurchase ?: return@synchronized null
+      if (productId != null && active.productId != productId) return@synchronized null
+      if (expectedPromise != null && active.promise !== expectedPromise) return@synchronized null
+      activePurchase = null
+      active
+    }
+
+  private fun resolveCancellation(productId: String, expectedPromise: Promise) {
+    val active = takeActivePurchase(productId, expectedPromise) ?: return
     active.promise.resolve(
       mapOf(
         "packageName" to packageName(),
@@ -313,10 +355,12 @@ class Manager247BillingModule : Module(), PurchasesUpdatedListener {
     )
   }
 
-  private fun failActivePurchase(productId: String, responseCode: Int) {
-    val active = activePurchase ?: return
-    if (active.productId != productId) return
-    activePurchase = null
+  private fun failActivePurchase(
+    productId: String,
+    responseCode: Int,
+    expectedPromise: Promise? = null,
+  ) {
+    val active = takeActivePurchase(productId, expectedPromise) ?: return
     rejectBilling(active.promise, "purchase", responseCode)
   }
 
@@ -388,8 +432,7 @@ class Manager247BillingModule : Module(), PurchasesUpdatedListener {
       connectionTasks.toList().also { connectionTasks.clear() }
     }
     tasks.forEach { it.onFailure(BillingClient.BillingResponseCode.SERVICE_DISCONNECTED) }
-    activePurchase?.let {
-      activePurchase = null
+    takeActivePurchase()?.let {
       rejectBilling(it.promise, "destroy", BillingClient.BillingResponseCode.SERVICE_DISCONNECTED)
     }
     billingClient?.endConnection()

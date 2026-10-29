@@ -6,7 +6,17 @@
  */
 
 import Constants from 'expo-constants';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type PropsWithChildren,
+} from 'react';
+import { AppState } from 'react-native';
 
 import type { Manager247BillingModule } from '../../modules/manager247-billing';
 import { IS_PLAY_STORE_BUILD } from '@/constants/paradim';
@@ -33,8 +43,9 @@ function loadNativeModule() {
 }
 
 type BillingController = ReturnType<typeof createGooglePlayBillingController>;
+const BillingContext = createContext<BillingState | null>(null);
 
-export function useBilling(): BillingState {
+function useBillingController(): BillingState {
   const { refresh: refreshEntitlement } = useSubscription();
   const productId = process.env.EXPO_PUBLIC_GOOGLE_PLAY_SUBSCRIPTION_ID?.trim() ?? '';
   const basePlanId = process.env.EXPO_PUBLIC_GOOGLE_PLAY_BASE_PLAN_ID?.trim() || undefined;
@@ -110,6 +121,17 @@ export function useBilling(): BillingState {
     };
   }, [basePlanId, configured, packageName, productId, refreshEntitlement]);
 
+  useEffect(() => {
+    if (!configured) return;
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      const controller = controllerRef.current;
+      if (!controller) return;
+      void controller.reconcile().catch(() => setError(RESTORE_ERROR));
+    });
+    return () => subscription.remove();
+  }, [configured]);
+
   const buy = useCallback(async () => {
     const controller = controllerRef.current;
     if (!configured || !controller) throw new BillingFlowError(CONNECTION_ERROR);
@@ -149,4 +171,15 @@ export function useBilling(): BillingState {
     buy,
     restore,
   };
+}
+
+export function BillingProvider({ children }: PropsWithChildren) {
+  const value = useBillingController();
+  return createElement(BillingContext.Provider, { value }, children);
+}
+
+export function useBilling(): BillingState {
+  const value = useContext(BillingContext);
+  if (!value) throw new Error('billing_provider_missing');
+  return value;
 }

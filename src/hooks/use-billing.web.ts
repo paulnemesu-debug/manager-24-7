@@ -5,7 +5,13 @@
  * See LICENSE-PROPRIETARY.md.
  */
 
+import { Fragment, createElement, type PropsWithChildren } from 'react';
+
 import type { BillingState } from '@/hooks/billing-types';
+
+export function BillingProvider({ children }: PropsWithChildren) {
+  return createElement(Fragment, null, children);
+}
 
 export function useBilling(): BillingState {
   return {

@@ -1,12 +1,13 @@
 // Local PostgreSQL regression harness. Never connects to a hosted database.
-// Install PGlite outside the checkout, then pass QA_PGLITE_PATH to its package.
+// QA_PGLITE_PATH can override the pinned project dependency for isolated debugging.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
 const runtime = process.env.QA_PGLITE_PATH;
-if (!runtime) throw new Error('Set QA_PGLITE_PATH to an isolated @electric-sql/pglite package');
-const { PGlite } = await import(pathToFileURL(resolve(runtime, 'dist/index.js')).href);
+const { PGlite } = runtime
+  ? await import(pathToFileURL(resolve(runtime, 'dist/index.js')).href)
+  : await import('@electric-sql/pglite');
 const db = new PGlite();
 const sql = (value) => db.exec(value);
 const scalar = async (value) => (await db.query(value)).rows[0]?.value;
@@ -36,18 +37,52 @@ update public.profiles set role='admin' where user_id=target_user_id;
 insert into public.subscriptions(user_id,platform,product_id,purchase_token_hash,status,current_period_start,current_period_end,auto_renewing,last_verified_at) values(target_user_id,'admin_grant','admin','admin:'||target_user_id,'active',now(),'2099-12-31',false,now()) on conflict(user_id) do update set status='active',current_period_end='2099-12-31'; end $$;
 revoke all on function private.grant_admin_access(uuid) from public;
 create function public.has_professional_access() returns boolean language sql as $$ select false $$;
-create table public.recipes(id uuid primary key default gen_random_uuid(),user_id uuid);
-create table public.recipe_ingredients(id uuid primary key default gen_random_uuid(),user_id uuid);
-create table public.ingredient_catalog(id uuid primary key default gen_random_uuid(),user_id uuid);
+create table public.recipes(
+  id uuid primary key default gen_random_uuid(), user_id uuid, title text, servings numeric
+);
+create table public.recipe_ingredients(
+  id uuid primary key default gen_random_uuid(), recipe_id uuid, user_id uuid,
+  ingredient_name text, quantity_net numeric, unit text, purchase_price numeric, price_unit text
+);
+create table public.ingredient_catalog(
+  id uuid primary key default gen_random_uuid(), user_id uuid, name text,
+  normalized_name text, purchase_price numeric, price_unit text
+);
 create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text,name text);
 create function storage.foldername(text) returns text[] language sql immutable as $$ select string_to_array($1,'/') $$;
 grant usage on schema storage to authenticated; grant select on storage.objects to authenticated;
 alter table storage.objects enable row level security;
 alter table public.profiles enable row level security;
 alter table public.subscriptions enable row level security;
+alter table public.recipes enable row level security;
+alter table public.recipe_ingredients enable row level security;
+alter table public.ingredient_catalog enable row level security;
 create policy own_profiles on public.profiles for select to authenticated using(user_id=auth.uid());
 create policy own_subscriptions on public.subscriptions for select to authenticated using(user_id=auth.uid());
+create policy recipes_insert_entitled on public.recipes for insert to authenticated
+  with check(user_id=auth.uid() and public.has_professional_access());
+create policy recipes_update_entitled on public.recipes for update to authenticated
+  using(user_id=auth.uid() and public.has_professional_access())
+  with check(user_id=auth.uid() and public.has_professional_access());
+create policy recipes_delete_entitled on public.recipes for delete to authenticated
+  using(user_id=auth.uid() and public.has_professional_access());
+create policy recipe_ingredients_insert_entitled on public.recipe_ingredients for insert to authenticated
+  with check(user_id=auth.uid() and public.has_professional_access());
+create policy recipe_ingredients_update_entitled on public.recipe_ingredients for update to authenticated
+  using(user_id=auth.uid() and public.has_professional_access())
+  with check(user_id=auth.uid() and public.has_professional_access());
+create policy recipe_ingredients_delete_entitled on public.recipe_ingredients for delete to authenticated
+  using(user_id=auth.uid() and public.has_professional_access());
+create policy ingredient_catalog_insert_entitled on public.ingredient_catalog for insert to authenticated
+  with check(user_id=auth.uid() and public.has_professional_access());
+create policy ingredient_catalog_update_entitled on public.ingredient_catalog for update to authenticated
+  using(user_id=auth.uid() and public.has_professional_access())
+  with check(user_id=auth.uid() and public.has_professional_access());
+create policy ingredient_catalog_delete_entitled on public.ingredient_catalog for delete to authenticated
+  using(user_id=auth.uid() and public.has_professional_access());
 grant select on public.profiles,public.subscriptions to authenticated;
+grant select,insert,update,delete on public.recipes,public.recipe_ingredients,public.ingredient_catalog
+  to authenticated;
 `);
 await sql(readFileSync('supabase/migrations/20260902140000_workspace_viewers.sql','utf8'));
 await sql(`create trigger on_auth_user_created after insert on auth.users for each row execute function private.handle_new_user();

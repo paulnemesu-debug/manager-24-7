@@ -8,10 +8,20 @@ const runtime = vi.hoisted(() => {
   const productId = 'professional_foodcost_pro';
   const userId = '11111111-1111-4111-8111-111111111111';
   const listener = { current: undefined as undefined | ((purchase: unknown) => void) };
+  const appStateListener = {
+    current: undefined as undefined | ((state: string) => void),
+  };
   return {
     productId,
     userId,
     listener,
+    appStateListener,
+    appState: {
+      addEventListener: vi.fn((_name: string, next: (state: string) => void) => {
+        appStateListener.current = next;
+        return { remove: vi.fn() };
+      }),
+    },
     refresh: vi.fn(async () => undefined),
     invoke: vi.fn(async () => ({ data: { valid: true }, error: null })),
     getUser: vi.fn(async () => ({ data: { user: { id: userId } }, error: null })),
@@ -61,9 +71,10 @@ vi.mock('@/lib/supabase', () => ({
 vi.mock('expo-constants', () => ({
   default: { expoConfig: { android: { package: 'ro.paradim.professionalfoodcost' } } },
 }));
+vi.mock('react-native', () => ({ AppState: runtime.appState }));
 vi.mock('../../modules/manager247-billing', () => ({ default: runtime.native }));
 
-import { useBilling } from './use-billing.native';
+import { BillingProvider, useBilling } from './use-billing.native';
 
 let renderer: ReactTestRenderer | undefined;
 let billing: BillingState | undefined;
@@ -87,6 +98,7 @@ beforeEach(() => {
   delete process.env.EXPO_PUBLIC_GOOGLE_PLAY_BASE_PLAN_ID;
   vi.clearAllMocks();
   runtime.listener.current = undefined;
+  runtime.appStateListener.current = undefined;
   billing = undefined;
 });
 
@@ -100,7 +112,7 @@ describe('Android billing hook', () => {
   it('loads the native client only when mounted and verifies purchase before access refresh', async () => {
     expect(runtime.native.connect).not.toHaveBeenCalled();
     await act(async () => {
-      renderer = create(<Probe />);
+      renderer = create(<BillingProvider><Probe /></BillingProvider>);
       await flush();
     });
 
@@ -135,12 +147,28 @@ describe('Android billing hook', () => {
 
   it('keeps the process billing client alive when the screen unmounts', async () => {
     await act(async () => {
-      renderer = create(<Probe />);
+      renderer = create(<BillingProvider><Probe /></BillingProvider>);
       await flush();
       renderer.unmount();
       renderer = undefined;
     });
 
     expect(runtime.native.disconnect).not.toHaveBeenCalled();
+  });
+
+  it('reconciles owned purchases when the app returns to the foreground', async () => {
+    await act(async () => {
+      renderer = create(<BillingProvider><Probe /></BillingProvider>);
+      await flush();
+    });
+    expect(runtime.native.restore).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      runtime.appStateListener.current?.('background');
+      runtime.appStateListener.current?.('active');
+      await flush();
+    });
+
+    expect(runtime.native.restore).toHaveBeenCalledTimes(2);
   });
 });

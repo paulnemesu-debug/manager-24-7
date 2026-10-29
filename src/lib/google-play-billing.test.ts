@@ -43,18 +43,25 @@ const purchase = (overrides: Partial<BillingPurchase> = {}): BillingPurchase => 
 
 function gateway(options: {
   offerBatches?: SubscriptionOffer[][];
-  owned?: BillingPurchase[];
+  ownedBatches?: BillingPurchase[][];
   launched?: BillingPurchase[];
+  emitDuringConnect?: BillingPurchase[];
 } = {}) {
   let listener: ((purchases: BillingPurchase[]) => void | Promise<void>) | undefined;
   const batches = options.offerBatches ?? [[offer()]];
   let queryIndex = 0;
+  const ownedBatches = options.ownedBatches ?? [[]];
+  let ownedIndex = 0;
   const native: BillingNativeGateway = {
-    connect: vi.fn(async () => undefined),
+    connect: vi.fn(async () => {
+      if (options.emitDuringConnect?.length) await listener?.(options.emitDuringConnect);
+    }),
     querySubscriptionOffers: vi.fn(async () => (
       batches[Math.min(queryIndex++, batches.length - 1)] ?? []
     )),
-    queryOwnedSubscriptions: vi.fn(async () => options.owned ?? []),
+    queryOwnedSubscriptions: vi.fn(async () => (
+      ownedBatches[Math.min(ownedIndex++, ownedBatches.length - 1)] ?? []
+    )),
     launchSubscriptionPurchase: vi.fn(async () => ({
       responseCode: 0,
       purchases: options.launched,
@@ -100,7 +107,11 @@ describe('Google Play billing boundary', () => {
     const stale = offer({ offerToken: 'stale-token' });
     const fresh = offer({ offerToken: 'fresh-token' });
     const testGateway = gateway({ offerBatches: [[stale], [fresh]] });
-    const verifyPurchase = vi.fn(async () => ({ valid: true }));
+    const verifyPurchase = vi.fn(async (_payload: {
+      packageName: string;
+      productId: string;
+      purchaseToken: string;
+    }) => ({ valid: true }));
     const refreshEntitlement = vi.fn(async () => undefined);
     const controller = createGooglePlayBillingController({
       native: testGateway.native,
@@ -155,6 +166,39 @@ describe('Google Play billing boundary', () => {
     expect(order).toEqual(['verify', 'refresh']);
   });
 
+  it('registers the listener before connect and reconciles owned purchases at startup', async () => {
+    const testGateway = gateway({
+      emitDuringConnect: [purchase({ purchaseToken: 'connect-token' })],
+      ownedBatches: [[purchase({ purchaseToken: 'owned-token' })]],
+    });
+    const verifyPurchase = vi.fn(async (_payload: {
+      packageName: string;
+      productId: string;
+      purchaseToken: string;
+    }) => ({ valid: true }));
+    const refreshEntitlement = vi.fn(async () => undefined);
+    const controller = createGooglePlayBillingController({
+      native: testGateway.native,
+      productId: 'professional_foodcost_pro',
+      packageName: 'ro.paradim.professionalfoodcost',
+      userId,
+      verifyPurchase,
+      refreshEntitlement,
+    });
+
+    await controller.initialize();
+
+    const listenerOrder = vi.mocked(testGateway.native.addPurchasesUpdatedListener)
+      .mock.invocationCallOrder[0];
+    const connectOrder = vi.mocked(testGateway.native.connect).mock.invocationCallOrder[0];
+    expect(listenerOrder).toBeLessThan(connectOrder);
+    expect(verifyPurchase).toHaveBeenCalledTimes(2);
+    expect(verifyPurchase.mock.calls.map(([payload]) => payload.purchaseToken).sort()).toEqual([
+      'connect-token',
+      'owned-token',
+    ]);
+  });
+
   it('verifies a purchase returned directly by the native launch before refreshing', async () => {
     const testGateway = gateway({ launched: [purchase()] });
     const order: string[] = [];
@@ -179,13 +223,13 @@ describe('Google Play billing boundary', () => {
   });
 
   it('restores each unique completed matching purchase and refreshes once', async () => {
-    const testGateway = gateway({ owned: [
+    const testGateway = gateway({ ownedBatches: [[], [
       purchase(),
       purchase(),
       purchase({ purchaseToken: 'purchase-token-B' }),
       purchase({ purchaseToken: 'pending-token', purchaseState: 'pending' }),
       purchase({ purchaseToken: 'foreign-token', productId: 'foreign-product' }),
-    ] });
+    ]] });
     const verifyPurchase = vi.fn(async () => ({ valid: true }));
     const refreshEntitlement = vi.fn(async () => undefined);
     const controller = createGooglePlayBillingController({
@@ -205,8 +249,32 @@ describe('Google Play billing boundary', () => {
     expect(refreshEntitlement).toHaveBeenCalledOnce();
   });
 
+  it('can reverify a restored token after an entitlement refresh failure', async () => {
+    const testGateway = gateway({ ownedBatches: [[], [purchase()], [purchase()]] });
+    const verifyPurchase = vi.fn(async () => ({ valid: true }));
+    const refreshEntitlement = vi.fn()
+      .mockRejectedValueOnce(new Error('temporary refresh failure'))
+      .mockResolvedValueOnce(undefined);
+    const controller = createGooglePlayBillingController({
+      native: testGateway.native,
+      productId: 'professional_foodcost_pro',
+      packageName: 'ro.paradim.professionalfoodcost',
+      userId,
+      verifyPurchase,
+      refreshEntitlement,
+    });
+    await controller.initialize();
+
+    await expect(controller.restore()).rejects.toBeInstanceOf(BillingFlowError);
+    await expect(controller.restore()).resolves.toBe(1);
+
+    expect(verifyPurchase).toHaveBeenCalledTimes(2);
+    expect(refreshEntitlement).toHaveBeenCalledTimes(2);
+  });
+
   it('does not refresh access or leak a purchase token when backend verification fails', async () => {
-    const testGateway = gateway({ owned: [purchase({ purchaseToken: 'secret-token-never-display' })] });
+    const secretPurchase = purchase({ purchaseToken: 'secret-token-never-display' });
+    const testGateway = gateway({ ownedBatches: [[], [secretPurchase], [secretPurchase]] });
     const verifyPurchase = vi.fn(async () => {
       throw new Error('backend response includes secret-token-never-display');
     });

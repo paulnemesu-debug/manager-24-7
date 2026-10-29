@@ -308,23 +308,24 @@ export function createGooglePlayNativeGateway(
 }
 
 export function createGooglePlayBillingController(dependencies: GooglePlayBillingDependencies) {
-  const verifiedTokens = new Set<string>();
   const inFlightTokens = new Set<string>();
   let listener: { remove: () => void } | undefined;
 
   const genericVerificationError = () => new BillingFlowError(VERIFICATION_FAILED);
 
   const verifyPurchases = async (purchases: BillingPurchase[]) => {
+    const operationTokens = new Set<string>();
     let verified = 0;
     for (const purchase of purchases) {
       if (
         purchase.productId !== dependencies.productId
         || purchase.purchaseState !== 'purchased'
         || !purchase.purchaseToken
-        || verifiedTokens.has(purchase.purchaseToken)
+        || operationTokens.has(purchase.purchaseToken)
         || inFlightTokens.has(purchase.purchaseToken)
       ) continue;
 
+      operationTokens.add(purchase.purchaseToken);
       inFlightTokens.add(purchase.purchaseToken);
       try {
         const result = await dependencies.verifyPurchase({
@@ -333,7 +334,6 @@ export function createGooglePlayBillingController(dependencies: GooglePlayBillin
           purchaseToken: purchase.purchaseToken,
         });
         if (!result.valid) throw genericVerificationError();
-        verifiedTokens.add(purchase.purchaseToken);
         verified += 1;
       } catch {
         throw genericVerificationError();
@@ -345,9 +345,16 @@ export function createGooglePlayBillingController(dependencies: GooglePlayBillin
     return verified;
   };
 
+  const reconcile = async () => {
+    try {
+      return await verifyPurchases(await dependencies.native.queryOwnedSubscriptions());
+    } catch {
+      throw genericVerificationError();
+    }
+  };
+
   return {
     async initialize() {
-      await dependencies.native.connect();
       if (!listener) {
         listener = dependencies.native.addPurchasesUpdatedListener(async (purchases) => {
           try {
@@ -358,6 +365,14 @@ export function createGooglePlayBillingController(dependencies: GooglePlayBillin
             );
           }
         });
+      }
+      await dependencies.native.connect();
+      try {
+        await reconcile();
+      } catch (caught) {
+        dependencies.onError?.(
+          caught instanceof BillingFlowError ? caught : genericVerificationError(),
+        );
       }
       const offers = await dependencies.native.querySubscriptionOffers(dependencies.productId);
       return selectSubscriptionOffer(offers, dependencies.basePlanId);
@@ -376,11 +391,11 @@ export function createGooglePlayBillingController(dependencies: GooglePlayBillin
     },
 
     async restore() {
-      try {
-        return await verifyPurchases(await dependencies.native.queryOwnedSubscriptions());
-      } catch {
-        throw genericVerificationError();
-      }
+      return reconcile();
+    },
+
+    async reconcile() {
+      return reconcile();
     },
 
     dispose() {

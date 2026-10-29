@@ -4,6 +4,7 @@
  */
 
 export const PRODUCTION_SUPABASE_PROJECT_REF = 'mnaaibsmijziutxuluvv';
+export const STAGING_SUPABASE_PROJECT_REF = 'ujyamyekrktaapzzkhaj';
 
 export type AppEnvironment = 'development' | 'staging' | 'production';
 
@@ -56,6 +57,9 @@ export function resolveRuntimeEnvironment(input: RuntimeEnvironmentInput): Runti
   }
   if (appEnv !== 'production' && projectRef === PRODUCTION_SUPABASE_PROJECT_REF) {
     throw new Error('production_project_for_non_production_runtime');
+  }
+  if (appEnv === 'staging' && projectRef !== STAGING_SUPABASE_PROJECT_REF) {
+    throw new Error('non_staging_project_for_staging_runtime');
   }
 
   return { configured: true, appEnv, supabaseUrl: url.toString(), supabasePublishableKey, projectRef };

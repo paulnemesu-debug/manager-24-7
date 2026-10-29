@@ -1,7 +1,7 @@
 {
   "cli": {
     "version": ">= 22.6.0",
-    "appVersionSource": "remote"
+    "appVersionSource": "local"
   },
   "build": {
     "development": {
@@ -34,7 +34,7 @@
       }
     },
     "production": {
-      "autoIncrement": true,
+      "autoIncrement": false,
       "environment": "production",
       "env": {
         "NODE_ENV": "production",
@@ -51,7 +51,7 @@
       }
     },
     "production-apk": {
-      "autoIncrement": true,
+      "autoIncrement": false,
       "environment": "production",
       "env": {
         "NODE_ENV": "production",
@@ -69,7 +69,7 @@
       "distribution": "internal"
     },
     "production-ios": {
-      "autoIncrement": true,
+      "autoIncrement": false,
       "environment": "production",
       "env": {
         "NODE_ENV": "production",

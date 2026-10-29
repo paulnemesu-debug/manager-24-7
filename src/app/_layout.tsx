@@ -29,6 +29,7 @@ import { LocaleProvider, useI18n } from '@/contexts/locale-context';
 import { PreferencesProvider } from '@/contexts/preferences-context';
 import { SubscriptionProvider } from '@/contexts/subscription-context';
 import { WorkspaceProvider } from '@/contexts/workspace-context';
+import { BillingProvider } from '@/hooks/use-billing';
 
 void SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
@@ -130,8 +131,10 @@ function RootLayout() {
           <AuthProvider>
             <PreferencesProvider>
               <SubscriptionProvider>
-                <PlatformAlerts />
-                <AppNavigator />
+                <BillingProvider>
+                  <PlatformAlerts />
+                  <AppNavigator />
+                </BillingProvider>
               </SubscriptionProvider>
             </PreferencesProvider>
           </AuthProvider>

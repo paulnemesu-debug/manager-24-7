@@ -7,4 +7,4 @@
 
 // Metro selects use-billing.native.ts or use-billing.web.ts at bundle time.
 // This bridge keeps the standalone TypeScript checker platform-agnostic.
-export { useBilling } from './use-billing.native';
+export { BillingProvider, useBilling } from './use-billing.native';

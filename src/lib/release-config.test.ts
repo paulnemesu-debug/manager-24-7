@@ -37,12 +37,18 @@ describe('Android release invariants', () => {
     const app = JSON.parse(read('app.json'));
     const pkg = JSON.parse(read('package.json'));
     const gradle = read('android/app/build.gradle');
+    const eas = JSON.parse(read('eas.json'));
     expect(app.expo.version).toBe('1.6.5');
     expect(pkg.version).toBe(app.expo.version);
     expect(app.expo.android.package).toBe('ro.paradim.professionalfoodcost');
+    expect(app.expo.android.versionCode).toBe(64);
     expect(gradle).toContain("applicationId 'ro.paradim.professionalfoodcost'");
     expect(gradle).toContain('versionName "1.6.5"');
     expect(gradle).toContain('versionCode 64');
+    expect(eas.cli.appVersionSource).toBe('local');
+    expect(eas.build.production.autoIncrement).toBe(false);
+    expect(eas.build['production-apk'].autoIncrement).toBe(false);
+    expect(eas.build['production-ios'].autoIncrement).toBe(false);
   });
 
   it('uses the atomic recipe RPC and an unambiguous ingredient relation', () => {
@@ -84,7 +90,7 @@ describe('Android release invariants', () => {
     expect(buildProperties.buildArchs).toEqual(['arm64-v8a']);
     expect(buildProperties.enableMinifyInReleaseBuilds).toBe(true);
     expect(buildProperties.enableShrinkResourcesInReleaseBuilds).toBe(true);
-    expect(easIgnore).toContain('package-lock.json');
+    expect(easIgnore).not.toMatch(/^package-lock\.json$/m);
     expect(easIgnore).not.toMatch(/^android\/$/m);
   });
 
@@ -134,6 +140,10 @@ describe('Android release invariants', () => {
     expect(productionChecklist).toContain('EXPO_PUBLIC_SUPABASE_URL=<configured-in-eas>');
     expect(productionChecklist).toContain('EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<configured-in-eas>');
     expect(productionChecklist).not.toContain('sb_publishable_');
+
+    const launchGuide = read('GHID-LANSARE.md');
+    expect(launchGuide).toContain('npx supabase link --project-ref ujyamyekrktaapzzkhaj');
+    expect(launchGuide).not.toContain('npx supabase link --project-ref mnaaibsmijziutxuluvv');
   });
 
   it('requires an explicit OTP project and a separate production override', () => {
@@ -141,6 +151,14 @@ describe('Android release invariants', () => {
     expect(script).toContain("process.argv.includes('--allow-production')");
     expect(script).toContain('production_requires_allow_production');
     expect(script).toContain('--project-ref');
+  });
+
+  it('keeps isolated database security checks in the reproducible release gate', () => {
+    const pkg = JSON.parse(read('package.json'));
+    expect(pkg.devDependencies['@electric-sql/pglite']).toBe('0.5.12');
+    expect(pkg.scripts['qa:database']).toContain('check-google-purchases.cjs');
+    expect(pkg.scripts['qa:database']).toContain('check-workspace-security.mjs');
+    expect(pkg.scripts['qa:release']).toContain('npm run qa:database');
   });
 
   it('keeps the first screen compact and splits the editor into four practical tabs', () => {

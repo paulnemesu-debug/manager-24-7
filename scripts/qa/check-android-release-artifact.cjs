@@ -89,14 +89,18 @@ function verifyApk(apkPath) {
   return { actual, failures: validateReleaseIdentity(actual) };
 }
 
+function buildIdentityReport(result) {
+  return {
+    expected: EXPECTED_RELEASE,
+    ...result,
+    apkIdentityGatePassed: result.failures.length === 0,
+  };
+}
+
 if (require.main === module) {
   try {
     const result = verifyApk(process.argv[2]);
-    process.stdout.write(`${JSON.stringify({
-      expected: EXPECTED_RELEASE,
-      ...result,
-      publishable: result.failures.length === 0,
-    }, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify(buildIdentityReport(result), null, 2)}\n`);
     if (result.failures.length > 0) process.exitCode = 1;
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : 'Artifact verification failed'}\n`);
@@ -106,6 +110,7 @@ if (require.main === module) {
 
 module.exports = {
   EXPECTED_RELEASE,
+  buildIdentityReport,
   normalizeDigest,
   parseAaptBadging,
   parseSignerCertificate,

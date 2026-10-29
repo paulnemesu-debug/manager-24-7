@@ -59,7 +59,9 @@ Detalii și limite: [RELEASE-1.5.3.md](./RELEASE-1.5.3.md), [VERIFICARE-1.5.3.js
 Instalează Node.js compatibil cu Expo SDK 57 și rulează `npm ci`.
 Copiază `ENV-PRODUCTION-EXAMPLE.txt` în `.env.production.local`; fișierul conține numai configurația publică.
 Pentru crash reporting, completează și configurația din `SENTRY-CONFIG-EXAMPLE.txt`.
-Rulează `npm run qa:flows` pentru simulări și `npm test` pentru testele automate.
+Rulează `npm run qa:release` pentru poarta completă reproductibilă: TypeScript,
+lint, teste automate, fluxuri simulate și verificările SQL izolate. Comenzile
+`npm test`, `npm run qa:flows` și `npm run qa:database` pot fi rulate și separat.
 Pentru Windows/Android Studio, urmează `BUILD-APK-LOCAL-WINDOWS.md` și rulează `BUILD-APK-LOCAL-WINDOWS.bat`.
 
 ## Corecție 1.4.5

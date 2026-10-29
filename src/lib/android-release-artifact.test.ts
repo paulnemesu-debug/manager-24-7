@@ -9,6 +9,15 @@ const verifier = require('../../scripts/qa/check-android-release-artifact.cjs') 
     versionCode: string;
     certificateSha256: string;
   };
+  buildIdentityReport: (result: {
+    actual: {
+      packageName: string;
+      versionName: string;
+      versionCode: string;
+      certificateSha256: string;
+    };
+    failures: string[];
+  }) => Record<string, unknown>;
   parseAaptBadging: (output: string) => {
     packageName: string;
     versionName: string;
@@ -54,5 +63,19 @@ describe('Android publishable-artifact gate', () => {
       'versionCode expected 64, received 63',
       'certificate SHA-256 does not match the approved release certificate',
     ]);
+  });
+
+  it('reports only the APK identity gate and does not label an artifact publishable', () => {
+    const report = verifier.buildIdentityReport({
+      actual: { ...verifier.EXPECTED_RELEASE },
+      failures: [],
+    });
+    expect(report).toMatchObject({ apkIdentityGatePassed: true });
+    expect(report).not.toHaveProperty('publishable');
+
+    expect(verifier.buildIdentityReport({
+      actual: { ...verifier.EXPECTED_RELEASE },
+      failures: ['certificate mismatch'],
+    })).toMatchObject({ apkIdentityGatePassed: false });
   });
 });

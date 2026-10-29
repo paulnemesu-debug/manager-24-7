@@ -31,10 +31,19 @@ Migrația `supabase/migrations/20260830120000_subrecipes_allergens_locale.sql` a
 semipreparate, alergeni, categorii standardizate, preferința de limbă și politicile
 de izolare pe utilizator pentru rețete.
 
+Validarea se face mai întâi exclusiv în proiectul staging:
+
 ```bash
-npx supabase link --project-ref mnaaibsmijziutxuluvv
+npx supabase link --project-ref ujyamyekrktaapzzkhaj
 npx supabase db push
 ```
+
+Nu rula aceste comenzi pe proiectul de producție din acest ghid. Înainte de
+orice migrare live, compară schema staging cu producția și verifică istoricul cu
+`npx supabase migration list --linked`. Migrațiile vechi ale căror obiecte există
+deja în producție se marchează `applied` numai după comparația SQL, nu se execută
+din nou. Lista staging trebuie să fie curată, iar aplicarea în producție cere o
+aprobare explicită separată și un backup verificat.
 
 Migrația a fost testată pe PostgreSQL 16 cu date vechi în tabele: categoriile scrise
 ca text liber („Ciorbe", „Fel principal") sunt convertite automat în valorile
@@ -179,9 +188,11 @@ npx eas-cli@latest build --platform android --profile production-apk --non-inter
 ```
 
 Profilul `production-apk` produce un APK semnat, cu variabilele de producție și
-cu incrementarea automată a `versionCode`. La prima rulare, EAS generează și
-păstrează cheia de semnare (keystore) — **nu o pierde**: fără ea, actualizările
-viitoare nu se pot instala peste versiunea existentă.
+cu `versionCode` preluat explicit din `app.json` (64 pentru versiunea 1.6.5).
+Versiunea nu se incrementează din starea ascunsă a contului EAS; la următoarea
+lansare trebuie mărite împreună versiunea și codul din repository. La prima
+rulare, EAS generează și păstrează cheia de semnare (keystore) — **nu o pierde**:
+fără ea, actualizările viitoare nu se pot instala peste versiunea existentă.
 
 Descarcă APK-ul din linkul afișat de EAS („Build details" → butonul **Install**)
 și redenumește-l `manager24-7.apk`. Codul QR afișat în terminal duce
