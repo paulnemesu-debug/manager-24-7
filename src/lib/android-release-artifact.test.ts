@@ -35,10 +35,10 @@ const verifier = require('../../scripts/qa/check-android-release-artifact.cjs') 
 describe('Android publishable-artifact gate', () => {
   it('parses the package/version and normalizes the signer digest', () => {
     expect(verifier.parseAaptBadging(
-      "package: name='ro.paradim.professionalfoodcost' versionCode='64' versionName='1.6.5' platformBuildVersionName='16'\n",
+      "package: name='ro.paradim.professionalfoodcost' versionCode='65' versionName='1.6.5' platformBuildVersionName='16'\n",
     )).toEqual({
       packageName: 'ro.paradim.professionalfoodcost',
-      versionCode: '64',
+      versionCode: '65',
       versionName: '1.6.5',
     });
     expect(verifier.parseSignerCertificate(
@@ -60,7 +60,7 @@ describe('Android publishable-artifact gate', () => {
     expect(failures).toEqual([
       'package expected ro.paradim.professionalfoodcost, received com.example.newapp',
       'versionName expected 1.6.5, received 1.6.4',
-      'versionCode expected 64, received 63',
+      'versionCode expected 65, received 63',
       'certificate SHA-256 does not match the approved release certificate',
     ]);
   });

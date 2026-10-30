@@ -188,11 +188,15 @@ npx eas-cli@latest build --platform android --profile production-apk --non-inter
 ```
 
 Profilul `production-apk` produce un APK semnat, cu variabilele de producție și
-cu `versionCode` preluat explicit din `app.json` (64 pentru versiunea 1.6.5).
+cu `versionCode` preluat explicit din `app.json` (65 pentru versiunea 1.6.5).
 Versiunea nu se incrementează din starea ascunsă a contului EAS; la următoarea
 lansare trebuie mărite împreună versiunea și codul din repository. La prima
 rulare, EAS generează și păstrează cheia de semnare (keystore) — **nu o pierde**:
 fără ea, actualizările viitoare nu se pot instala peste versiunea existentă.
+
+Versiunea 1.6.5 nu include `expo-updates`, `updates.url` sau `runtimeVersion`.
+Prin urmare, inclusiv remedierile exclusiv JavaScript cer un APK/AAB nou, iar
+varianta web trebuie exportată și republicată; nu există un canal OTA activ.
 
 Descarcă APK-ul din linkul afișat de EAS („Build details" → butonul **Install**)
 și redenumește-l `manager24-7.apk`. Codul QR afișat în terminal duce

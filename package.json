@@ -74,7 +74,7 @@
     "vitest": "^4.1.11"
   },
   "scripts": {
-    "postinstall": "node scripts/install-native-xlsx.cjs",
+    "postinstall": "node scripts/install-native-xlsx.cjs && node scripts/install-query-string-decode-compat.cjs",
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo run:android",
@@ -87,6 +87,9 @@
     "qa:database": "node scripts/qa/check-google-purchases.cjs && node scripts/qa/check-workspace-security.mjs",
     "qa:release": "npm run typecheck && npm run lint && npm test && npm run qa:flows && npm run qa:database",
     "qa:android-release": "node scripts/qa/check-android-release-artifact.cjs"
+  },
+  "overrides": {
+    "decode-uri-component": "0.5.1"
   },
   "private": true
 }

@@ -41,10 +41,10 @@ describe('Android release invariants', () => {
     expect(app.expo.version).toBe('1.6.5');
     expect(pkg.version).toBe(app.expo.version);
     expect(app.expo.android.package).toBe('ro.paradim.professionalfoodcost');
-    expect(app.expo.android.versionCode).toBe(64);
+    expect(app.expo.android.versionCode).toBe(65);
     expect(gradle).toContain("applicationId 'ro.paradim.professionalfoodcost'");
     expect(gradle).toContain('versionName "1.6.5"');
-    expect(gradle).toContain('versionCode 64');
+    expect(gradle).toContain('versionCode 65');
     expect(eas.cli.appVersionSource).toBe('local');
     expect(eas.build.production.autoIncrement).toBe(false);
     expect(eas.build['production-apk'].autoIncrement).toBe(false);

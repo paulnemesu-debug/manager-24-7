@@ -7,7 +7,7 @@ const { spawnSync } = require('node:child_process');
 const EXPECTED_RELEASE = Object.freeze({
   packageName: 'ro.paradim.professionalfoodcost',
   versionName: '1.6.5',
-  versionCode: '64',
+  versionCode: '65',
   certificateSha256: 'DD64E216CA5F7D1E0E05349F8A0D2DD8E54A5F5C22688E620EC287D496FBEF1E',
 });
 

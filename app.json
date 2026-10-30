@@ -12,7 +12,7 @@
     "userInterfaceStyle": "light",
     "android": {
       "package": "ro.paradim.professionalfoodcost",
-      "versionCode": 64,
+      "versionCode": 65,
       "allowBackup": false,
       "blockedPermissions": [
         "android.permission.SYSTEM_ALERT_WINDOW",

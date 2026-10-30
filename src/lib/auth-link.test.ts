@@ -28,6 +28,12 @@ describe('linkul de acces din email', () => {
     );
   });
 
+  it('citește același OTP din deep linkul nativ', () => {
+    expect(parseAuthLink('manager247://auth/callback?token_hash=h9%20safe&type=email')).toEqual(
+      { kind: 'otp', tokenHash: 'h9 safe', type: 'email' },
+    );
+  });
+
   it('citește sesiunea din fragmentul adresei', () => {
     expect(parseAuthLink('https://foodcost.paradim.ro/#access_token=aa&refresh_token=bb&expires_in=3600')).toEqual(
       { kind: 'session', accessToken: 'aa', refreshToken: 'bb' },
@@ -54,5 +60,13 @@ describe('linkul de acces din email', () => {
     expect(parseAuthLink('https://x.supabase.co/auth/v1/verify?token=t&type=ceva')).toEqual(
       { kind: 'otp', tokenHash: 't', type: 'magiclink' },
     );
+  });
+
+  it.each([
+    ['manager247://auth/callback?token_hash=safe%zz&type=ceva', { kind: 'otp', tokenHash: 'safe%zz', type: 'magiclink' }],
+    ['manager247://auth/callback?token_hash=%E0%A4%A&type=email', { kind: 'otp', tokenHash: '�%A', type: 'email' }],
+  ] as const)('nu se blochează pe codificarea malformată din %s', (url, expected) => {
+    expect(() => parseAuthLink(url)).not.toThrow();
+    expect(parseAuthLink(url)).toEqual(expected);
   });
 });

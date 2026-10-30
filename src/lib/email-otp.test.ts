@@ -36,6 +36,10 @@ describe('email OTP', () => {
     'does not silently truncate or extract digits from %s', (value) => expect(parseOtpInput(value)).toBeNull(),
   );
 
+  it.each(['１２３４５６', '١٢٣٤٥٦', '12345%36', '123456\u0000'])(
+    'rejects malformed or non-ASCII OTP input %s', (value) => expect(parseOtpInput(value)).toBeNull(),
+  );
+
   it('accepts both the requested 6-digit setting and the current 8-digit server setting', () => {
     expect(isAcceptedOtpLength('123456')).toBe(true);
     expect(isAcceptedOtpLength('12345678')).toBe(true);
