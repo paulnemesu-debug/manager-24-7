@@ -16,10 +16,10 @@ import {
 } from 'react';
 
 import { useAuth } from '@/contexts/auth-context';
-import { extendOtpDemoAccess, isOtpDemoAccount } from '@/lib/demo-access';
+import { DEMO_SUBSCRIPTION_PRODUCT_ID, extendOtpDemoAccess, isOtpDemoAccount } from '@/lib/demo-access';
 import {
   hasEntitlementAccess,
-  isEntitlementLeaseValid,
+  OFFLINE_ENTITLEMENT_DAYS,
   readEntitlementSnapshot,
   type EntitlementSnapshot,
   writeEntitlementSnapshot,
@@ -72,6 +72,7 @@ export function SubscriptionProvider({ children }: PropsWithChildren) {
     checkedAt: new Date().toISOString(),
   } : EMPTY_SNAPSHOT);
   const [isLoading, setIsLoading] = useState(!isDemoMode);
+  const [expiryTick, setExpiryTick] = useState(0);
 
   const refresh = useCallback(async () => {
     if (isDemoMode || isDemo) {
@@ -110,8 +111,8 @@ export function SubscriptionProvider({ children }: PropsWithChildren) {
           .maybeSingle(),
       ]);
 
-      // Contul demo nu primește acces permanent. După expirare, doar o sesiune
-      // creată cu un OTP de email proaspăt poate consuma încă trei zile.
+      // Primul OTP de email proaspăt activează zece zile pentru contul demo.
+      // Serverul păstrează aceeași dată de expirare la autentificările următoare.
       if (!accessResult.error && accessResult.data !== true && isOtpDemoAccount(user.email)) {
         try {
           await extendOtpDemoAccess(supabase);
@@ -124,7 +125,7 @@ export function SubscriptionProvider({ children }: PropsWithChildren) {
               .maybeSingle(),
           ]);
         } catch {
-          // Un token vechi nu prelungește accesul. Continuăm cu răspunsul
+          // Un token vechi nu activează accesul. Continuăm cu răspunsul
           // inițial, iar utilizatorul rămâne pe ecranul de acces expirat.
         }
       }
@@ -195,22 +196,38 @@ export function SubscriptionProvider({ children }: PropsWithChildren) {
     }
   }, [isAuthenticated, refresh]);
 
-  const leaseValid = isDemoMode || isDemo || isEntitlementLeaseValid(snapshot);
-  // Acces beta 1.0: plățile sunt amânate până la configurarea companiei.
-  // Păstrăm citirea abonamentului pentru compatibilitate, fără a bloca produsul.
-  const isPro = isDemoMode || isDemo || (leaseValid && snapshot.serverAllowed);
+  const hasAccess = isDemoMode || isDemo || hasEntitlementAccess(snapshot);
+
+  useEffect(() => {
+    if (isDemoMode || isDemo || !isAuthenticated || snapshot.productId !== DEMO_SUBSCRIPTION_PRODUCT_ID) return;
+    const periodEnd = new Date(snapshot.periodEnd ?? '').getTime();
+    const checkedAt = new Date(snapshot.checkedAt).getTime();
+    const leaseEnd = checkedAt + OFFLINE_ENTITLEMENT_DAYS * 24 * 60 * 60 * 1000 + 1;
+    const remaining = Math.min(periodEnd, leaseEnd) - Date.now();
+    if (!Number.isFinite(remaining)) return;
+    if (remaining <= 0) {
+      // Efectul poate începe chiar după limita văzută încă validă la randare.
+      if (hasAccess) setExpiryTick((tick) => tick + 1);
+      return;
+    }
+
+    // Un ecran lăsat deschis pierde accesul la aceeași limită ca un cache recitit.
+    // Limita evită overflow-ul setTimeout pentru metadate cu o dată îndepărtată.
+    const expiryTimer = setTimeout(() => setExpiryTick((tick) => tick + 1), Math.min(remaining, 2_147_483_647));
+    return () => clearTimeout(expiryTimer);
+  }, [expiryTick, hasAccess, isAuthenticated, isDemo, snapshot, user?.id]);
 
   const value = useMemo<SubscriptionContextValue>(() => ({
     status: snapshot.status,
     isAdmin: snapshot.isAdmin,
-    plan: isPro ? 'pro' : 'free',
-    hasAccess: isDemoMode || isDemo || hasEntitlementAccess(snapshot),
+    plan: hasAccess ? 'pro' : 'free',
+    hasAccess,
     isLoading,
     productId: snapshot.productId,
     periodEnd: snapshot.periodEnd,
     isViewer: snapshot.isViewer,
     refresh,
-  }), [isDemo, isLoading, isPro, refresh, snapshot]);
+  }), [hasAccess, isLoading, refresh, snapshot]);
 
   return <SubscriptionContext.Provider value={value}>{children}</SubscriptionContext.Provider>;
 }

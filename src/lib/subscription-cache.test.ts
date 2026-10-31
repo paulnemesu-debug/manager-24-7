@@ -46,4 +46,23 @@ describe('offline entitlement lease', () => {
       expect(hasEntitlementAccess(snapshot({ checkedAt }), now)).toBe(false);
     }
   });
+
+  it('caps the fixed demo at its exact server expiry even with a fresh offline lease', () => {
+    const demo = snapshot({
+      productId: 'manager247_demo_10d',
+      periodEnd: '2026-09-13T12:00:00.000Z',
+    });
+    expect(hasEntitlementAccess(demo, now - 1)).toBe(true);
+    expect(hasEntitlementAccess(demo, now)).toBe(false);
+    expect(hasEntitlementAccess(demo, now + 1)).toBe(false);
+  });
+
+  it.each([null, '', 'invalid', 'Infinity'])('denies a fixed demo with unusable expiry %s', (periodEnd) => {
+    expect(hasEntitlementAccess(snapshot({ productId: 'manager247_demo_10d', periodEnd }), now)).toBe(false);
+  });
+
+  it('preserves the existing paid and admin offline leases independently of subscription expiry metadata', () => {
+    expect(hasEntitlementAccess(snapshot({ periodEnd: '2020-01-01T00:00:00.000Z' }), now)).toBe(true);
+    expect(hasEntitlementAccess(snapshot({ isAdmin: true, productId: null, periodEnd: null }), now)).toBe(true);
+  });
 });

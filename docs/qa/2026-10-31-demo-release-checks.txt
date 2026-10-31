@@ -1,0 +1,599 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> manager247@1.6.5 qa:release
+> npm run typecheck && npm run lint && npm test && npm run qa:flows && npm run qa:database
+
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> manager247@1.6.5 typecheck
+> tsc --noEmit
+
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> manager247@1.6.5 lint
+> expo lint
+
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> manager247@1.6.5 test
+> vitest run
+
+
+ RUN  v4.1.11 /workspace/scratch/18c759cb7756/manager-24-7
+
+
+ Test Files  114 passed (114)
+      Tests  902 passed (902)
+   Start at  07:30:44
+   Duration  21.23s (transform 2.61s, setup 0ms, import 10.74s, tests 13.05s, environment 14ms)
+
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> manager247@1.6.5 qa:flows
+> node scripts/qa/check-folders.cjs && node scripts/qa/check-draft-flows.cjs && node scripts/qa/check-auth-haccp.cjs && node scripts/qa/check-nutrition-flows.cjs && node scripts/qa/check-commercial-flows.cjs && node scripts/qa/check-operational-flows.cjs && node scripts/qa/check-operations-remediation.cjs
+
+{"checks_passed":6,"checks":["four folders with distinct offline photos","2 by 2 fitted grid at four viewport sizes","accessible scrolling for large fonts","form state retained across closing and switching","Android back handler closes and cleans up","saving redirects to My recipes even for the same folder"],"renderer":"React test renderer with native adapters","physical_device":false}
+{"checks_passed":10,"checks":["recipe portions can be cleared, retyped and entered with a Romanian decimal separator","typing persists a new draft and reopening restores the title","My recipes resumes the matching local draft","opening a completed recipe without edits creates no pending draft","a failed conflicting save retains the draft and refreshes cloud data","comparison confirmation rebases the save, clears the draft and returns to My recipes","camera permission denial shows feedback without launching capture","canceling photo selection keeps the original draft","selected photo persists in the draft and reappears after reopening","removing a photo stores an explicit removal intent"],"renderer":"React test renderer using actual editor, recipe list and draft storage","native_adapters":true,"physical_device":false}
+{"checks_passed":11,"checks":["invalid registration email is rejected before service invocation","valid email is normalized, sends one request and opens OTP entry","OTP cooldown prevents repeated service requests","invalid or expired OTP retains the email and allows another attempt","successful OTP verification routes through the main access gate","HACCP star toggles persist independently without opening the form","favorite selection survives reopening the HACCP screen","switching accounts hides the previous account favorites","favorite persistence failure retains the previous state and re-enables selection","HACCP search handles no results and Romanian diacritics","every HACCP form remains reachable across paginated results"],"haccp_forms_reachable":19,"renderer":"Actual sign-in, HACCP browser and favorites hook","service_adapters":true,"otp_email_sent":false,"physical_device":false}
+{"checks_passed":8,"checks":["typing a Romanian ingredient completes official nutrition offline","all nine nutrients are visible on the ingredients page without opening the nutrition tab","saving carries automatic values, qualifiers and provenance in the actual editor draft","reopening a saved recipe displays nutrition without creating an edited draft","renaming an automatic ingredient clears stale values and identifies missing data","local search lets the operator explicitly choose cooked food without network calls","manual label edits opt out of automatic replacement","the ingredient form retains an explicit edible mass for future calculations"],"renderer":"Actual recipe editor, nutrition fields, final summary and draft persistence with native/service adapters","nutrition_network_calls":0,"physical_device":false}
+{
+  "mode": "React screen execution with native/cloud adapters",
+  "checks": [
+    {
+      "name": "Simulator initializes after asynchronous recipe loading",
+      "passed": true
+    },
+    {
+      "name": "Decimal quantities preserve the separator while typing",
+      "passed": true
+    },
+    {
+      "name": "Quantity and alternate supplier scenario leaves saved recipe and catalog unchanged",
+      "passed": true
+    },
+    {
+      "name": "Scenario reset restores the baseline",
+      "passed": true
+    },
+    {
+      "name": "Scanning and preview do not write prices or learned mappings",
+      "passed": true
+    },
+    {
+      "name": "Duplicate invoice lines cannot update one product with two prices",
+      "passed": true
+    },
+    {
+      "name": "Editing a price invalidates the previous confirmation",
+      "passed": true
+    },
+    {
+      "name": "A negative corrected invoice price cannot silently become positive",
+      "passed": true
+    },
+    {
+      "name": "Only confirmed selected prices are applied and learned",
+      "passed": true
+    },
+    {
+      "name": "Foreign currency cannot silently become a RON price",
+      "passed": true
+    },
+    {
+      "name": "Viewer cannot start invoice import",
+      "passed": true
+    },
+    {
+      "name": "CSV sales import requires confirmation and feeds the margin matrix",
+      "passed": true
+    },
+    {
+      "name": "Menu action opens a simulation for the selected dish",
+      "passed": true
+    }
+  ],
+  "passed": 13,
+  "limitations": [
+    "No physical phone, live OTP, real payment, camera hardware or native crash ingestion is tested by this script."
+  ]
+}
+{
+  "passed": 9,
+  "checks": [
+    "Document creation persists and exposes expired status",
+    "Renewing a document updates the same record",
+    "Archive and restore remain reversible",
+    "All five onboarding checks and hire date persist",
+    "Completed offboarding deactivates the employee and preserves historical shifts",
+    "Daily Manager renders actual priorities and opens a remediation screen",
+    "Home counts a scheduled shift as pending attendance and leave as recorded",
+    "Home and P&L agree when saved payroll differs from current active-employee salaries",
+    "Home and P&L both exclude inactive employees without rewriting stored P&L"
+  ],
+  "limitations": [
+    "Native adapters; physical Android behavior is validated separately."
+  ]
+}
+{
+  "checks": [
+    {
+      "id": "OP02 negative direct catalog price is rejected",
+      "status": "PASS"
+    },
+    {
+      "id": "OP12 plan survives remount and is scoped per account",
+      "status": "PASS"
+    },
+    {
+      "id": "Production portions keep the decimal separator while typing",
+      "status": "PASS"
+    },
+    {
+      "id": "OP16 history can reopen and edit existing manual issue",
+      "status": "PASS"
+    },
+    {
+      "id": "OP16 reopening history does not overwrite edits when sync finishes later",
+      "status": "PASS"
+    },
+    {
+      "id": "OP16 older stock issues remain reachable from paginated history",
+      "status": "PASS"
+    },
+    {
+      "id": "OP18 duplicate sales rows aggregate before applying",
+      "status": "PASS"
+    },
+    {
+      "id": "OP20 negative waste is rejected rather than made positive",
+      "status": "PASS"
+    },
+    {
+      "id": "OP22 invalid monthly day is rejected before saving",
+      "status": "PASS"
+    },
+    {
+      "id": "Legacy pending management snapshot is visibly marked for reconciliation",
+      "status": "PASS"
+    }
+  ],
+  "passed": 10,
+  "failed": 0
+}
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> manager247@1.6.5 qa:database
+> node scripts/qa/check-google-purchases.cjs && node scripts/qa/check-workspace-security.mjs && node scripts/qa/check-demo-ten-days.mjs
+
+{
+  "mode": "Actual Edge TypeScript + actual SQL migration in PGlite; synthetic Google/Auth/clock only",
+  "total": 48,
+  "passed": 48,
+  "failed": 0,
+  "checks": [
+    {
+      "name": "Migration backfills ownership of existing Google subscription",
+      "result": "PASS"
+    },
+    {
+      "name": "Old expired receipt preserves a different current paid token (PAY03)",
+      "result": "PASS"
+    },
+    {
+      "name": "Pending linked replacement cannot expire current grant (PAY03)",
+      "result": "PASS"
+    },
+    {
+      "name": "ACTIVE with missing expiry is denied (PAY05)",
+      "result": "PASS"
+    },
+    {
+      "name": "ACTIVE with 2026-10-30T14:31:11.372Z expiry is denied (PAY05)",
+      "result": "PASS"
+    },
+    {
+      "name": "ACTIVE with invalid expiry is denied (PAY05)",
+      "result": "PASS"
+    },
+    {
+      "name": "IN_GRACE_PERIOD with missing expiry is denied (PAY05)",
+      "result": "PASS"
+    },
+    {
+      "name": "IN_GRACE_PERIOD with 2026-10-30T14:31:11.372Z expiry is denied (PAY05)",
+      "result": "PASS"
+    },
+    {
+      "name": "IN_GRACE_PERIOD with invalid expiry is denied (PAY05)",
+      "result": "PASS"
+    },
+    {
+      "name": "CANCELED with missing expiry is denied (PAY05)",
+      "result": "PASS"
+    },
+    {
+      "name": "CANCELED with 2026-10-30T14:31:11.372Z expiry is denied (PAY05)",
+      "result": "PASS"
+    },
+    {
+      "name": "CANCELED with invalid expiry is denied (PAY05)",
+      "result": "PASS"
+    },
+    {
+      "name": "Older still-active unrelated token cannot shorten current entitlement",
+      "result": "PASS"
+    },
+    {
+      "name": "Same-token revocation is applied",
+      "result": "PASS"
+    },
+    {
+      "name": "Same-token renewal extends the period",
+      "result": "PASS"
+    },
+    {
+      "name": "Valid linked replacement permanently invalidates predecessor",
+      "result": "PASS"
+    },
+    {
+      "name": "Invalid linked replacement never supersedes predecessor",
+      "result": "PASS"
+    },
+    {
+      "name": "A receipt owned by another account cannot be assigned or changed",
+      "result": "PASS"
+    },
+    {
+      "name": "Foreign linked token rejects transaction without touching either grant",
+      "result": "PASS"
+    },
+    {
+      "name": "Older response arriving after revocation cannot reactivate token",
+      "result": "PASS"
+    },
+    {
+      "name": "Newer same-token revocation overrides previous active response",
+      "result": "PASS"
+    },
+    {
+      "name": "Same-millisecond concurrent response cannot undo revocation",
+      "result": "PASS"
+    },
+    {
+      "name": "Valid newer unrelated receipt replaces current and cannot later be reassigned",
+      "result": "PASS"
+    },
+    {
+      "name": "Different inactive Google receipt preserves an active manual grant",
+      "result": "PASS"
+    },
+    {
+      "name": "Inactive PENDING receipt with unknown start permits a fresh unrelated paid token",
+      "result": "PASS"
+    },
+    {
+      "name": "Inactive PENDING_PURCHASE_CANCELED receipt with unknown start permits a fresh unrelated paid token",
+      "result": "PASS"
+    },
+    {
+      "name": "Inactive known-start grant still rejects a provably older unrelated token",
+      "result": "PASS"
+    },
+    {
+      "name": "Active unknown-start grant still blocks unordered unrelated replacement",
+      "result": "PASS"
+    },
+    {
+      "name": "Concurrent synthetic claims serialize to one owner",
+      "result": "PASS"
+    },
+    {
+      "name": "RPC persistence failure cannot acknowledge or report a grant",
+      "result": "PASS"
+    },
+    {
+      "name": "Actual transaction rolls back linked invalidation on final write failure",
+      "result": "PASS"
+    },
+    {
+      "name": "RPC and ledger deny anonymous and authenticated callers",
+      "result": "PASS"
+    },
+    {
+      "name": "Service role can execute the invoker RPC",
+      "result": "PASS"
+    },
+    {
+      "name": "Deleting account cascades ownership history",
+      "result": "PASS"
+    },
+    {
+      "name": "Google ACTIVE retains expected mapping",
+      "result": "PASS"
+    },
+    {
+      "name": "Google IN_GRACE_PERIOD retains expected mapping",
+      "result": "PASS"
+    },
+    {
+      "name": "Google CANCELED retains expected mapping",
+      "result": "PASS"
+    },
+    {
+      "name": "Google PAUSED retains expected mapping",
+      "result": "PASS"
+    },
+    {
+      "name": "Google ON_HOLD retains expected mapping",
+      "result": "PASS"
+    },
+    {
+      "name": "Google EXPIRED retains expected mapping",
+      "result": "PASS"
+    },
+    {
+      "name": "Google PENDING_PURCHASE_CANCELED retains expected mapping",
+      "result": "PASS"
+    },
+    {
+      "name": "Google PENDING retains expected mapping",
+      "result": "PASS"
+    },
+    {
+      "name": "Valid free trial is acknowledged once per pending Google response",
+      "result": "PASS"
+    },
+    {
+      "name": "Idempotent active receipt produces one grant and one ledger record",
+      "result": "PASS"
+    },
+    {
+      "name": "Missing session, malformed token and product mismatch make no Google request",
+      "result": "PASS"
+    },
+    {
+      "name": "Wrong account binding cannot reach persistence",
+      "result": "PASS"
+    },
+    {
+      "name": "oauth failure cannot change current paid grant",
+      "result": "PASS"
+    },
+    {
+      "name": "google failure cannot change current paid grant",
+      "result": "PASS"
+    }
+  ],
+  "limitations": [
+    "PGlite uses a single database session; real cross-session lock contention is not simulated.",
+    "No live Google Play, Supabase deployment or purchase performed."
+  ]
+}
+{
+  "mode": "migration",
+  "passed": 26,
+  "failed": 0,
+  "results": [
+    {
+      "name": "Historical identity cleanup: legacy-attacker@example.test",
+      "status": "PASS"
+    },
+    {
+      "name": "Historical identity cleanup: victim@example.test",
+      "status": "PASS"
+    },
+    {
+      "name": "Historical identity cleanup: unverified@example.test",
+      "status": "PASS"
+    },
+    {
+      "name": "Historical identity cleanup: legacy-member@example.test",
+      "status": "PASS"
+    },
+    {
+      "name": "Data API cannot create self membership",
+      "status": "PASS"
+    },
+    {
+      "name": "Data API cannot grant another member access",
+      "status": "PASS"
+    },
+    {
+      "name": "Owner can revoke but cannot reactivate or rebind",
+      "status": "PASS"
+    },
+    {
+      "name": "Members and unrelated owners cannot revoke another workspace",
+      "status": "PASS"
+    },
+    {
+      "name": "Direct delete and role escalation are forbidden",
+      "status": "PASS"
+    },
+    {
+      "name": "Entitled owner grants professional access and shared images",
+      "status": "PASS"
+    },
+    {
+      "name": "Owner expiration removes inherited professional and image access",
+      "status": "PASS"
+    },
+    {
+      "name": "Admin grant and current trial remain entitled",
+      "status": "PASS"
+    },
+    {
+      "name": "Service invitation resolves confirmed Auth email despite forged profile",
+      "status": "PASS"
+    },
+    {
+      "name": "Editable profile email cannot bind an invitation",
+      "status": "PASS"
+    },
+    {
+      "name": "Unconfirmed signup stays pending until Auth email is confirmed",
+      "status": "PASS"
+    },
+    {
+      "name": "Signup cannot activate revoked invites or invites of expired owners",
+      "status": "PASS"
+    },
+    {
+      "name": "Email changes remove previous membership identity",
+      "status": "PASS"
+    },
+    {
+      "name": "Service invitation rejects self, unpaid owners, inherited-only owners and invalid input",
+      "status": "PASS"
+    },
+    {
+      "name": "Invitation reservation rate limits repeat attempts atomically",
+      "status": "PASS"
+    },
+    {
+      "name": "Authenticated users cannot call service-only identity RPC or private entitlement lookup",
+      "status": "PASS"
+    },
+    {
+      "name": "Confirmed allowlisted administrator keeps admin grant; unconfirmed cannot claim it",
+      "status": "PASS"
+    },
+    {
+      "name": "Reinviting an unconfirmed account removes any stale previous identity",
+      "status": "PASS"
+    },
+    {
+      "name": "Database rejects even service self membership and active rows without identity",
+      "status": "PASS"
+    },
+    {
+      "name": "Authorization independently rejects mismatched Auth identity",
+      "status": "PASS"
+    },
+    {
+      "name": "Rollback-only post-deployment SQL smoke test",
+      "status": "PASS"
+    },
+    {
+      "name": "Two-account hosted-compatible isolation smoke test",
+      "status": "PASS"
+    }
+  ]
+}
+{
+  "mode": "local-only",
+  "migration": "supabase/migrations/20261030064717_demo_10d_otp_access.sql",
+  "passed": 27,
+  "failed": 0,
+  "results": [
+    {
+      "name": "Fresh email OTP creates exactly one nonrenewing ten-day trial",
+      "status": "PASS"
+    },
+    {
+      "name": "Repeated valid OTP preserves the original expiry and all subscription fields",
+      "status": "PASS"
+    },
+    {
+      "name": "A demo with past expiry becomes expired without a renewed window",
+      "status": "PASS"
+    },
+    {
+      "name": "A demo with boundary expiry becomes expired without a renewed window",
+      "status": "PASS"
+    },
+    {
+      "name": "A demo with missing expiry becomes expired without a renewed window",
+      "status": "PASS"
+    },
+    {
+      "name": "An already expired demo is not reactivated even with a future stored expiry",
+      "status": "PASS"
+    },
+    {
+      "name": "PARADIM owner cannot activate the demo with a fresh OTP",
+      "status": "PASS"
+    },
+    {
+      "name": "unrelated email cannot activate the demo with a fresh OTP",
+      "status": "PASS"
+    },
+    {
+      "name": "Missing authenticated user identity is rejected",
+      "status": "PASS"
+    },
+    {
+      "name": "Anonymous role cannot execute even with forged eligible JWT fixture claims",
+      "status": "PASS"
+    },
+    {
+      "name": "missing AMR cannot activate or renew a demo",
+      "status": "PASS"
+    },
+    {
+      "name": "empty AMR cannot activate or renew a demo",
+      "status": "PASS"
+    },
+    {
+      "name": "password authentication cannot activate or renew a demo",
+      "status": "PASS"
+    },
+    {
+      "name": "stale OTP cannot activate or renew a demo",
+      "status": "PASS"
+    },
+    {
+      "name": "future OTP beyond clock skew allowance cannot activate or renew a demo",
+      "status": "PASS"
+    },
+    {
+      "name": "missing timestamp cannot activate or renew a demo",
+      "status": "PASS"
+    },
+    {
+      "name": "malformed timestamp cannot activate or renew a demo",
+      "status": "PASS"
+    },
+    {
+      "name": "overflowing timestamp cannot activate or renew a demo",
+      "status": "PASS"
+    },
+    {
+      "name": "malformed AMR object cannot activate or renew a demo",
+      "status": "PASS"
+    },
+    {
+      "name": "Most recent valid OTP is selected among AMR methods",
+      "status": "PASS"
+    },
+    {
+      "name": "OTP within the permitted positive clock skew activates normally",
+      "status": "PASS"
+    },
+    {
+      "name": "Email comparison follows the migration case and whitespace normalization",
+      "status": "PASS"
+    },
+    {
+      "name": "Existing professional_foodcost_admin entitlement cannot be replaced by the demo",
+      "status": "PASS"
+    },
+    {
+      "name": "Existing manager247_yearly entitlement cannot be replaced by the demo",
+      "status": "PASS"
+    },
+    {
+      "name": "Activation changes no profile role or Auth metadata and touches no other user",
+      "status": "PASS"
+    },
+    {
+      "name": "Editable metadata cannot substitute for the eligible signed email or fresh OTP",
+      "status": "PASS"
+    },
+    {
+      "name": "Authenticated callers cannot bypass the RPC to write entitlement fields",
+      "status": "PASS"
+    }
+  ]
+}

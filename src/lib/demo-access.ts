@@ -9,7 +9,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { normalizeEmail } from '@/lib/email-otp';
 
-export const DEMO_ACCOUNT_EMAIL = 'paul.nemesu@paradim.ro';
+export const DEMO_ACCOUNT_EMAIL = 'demo@paradim.ro';
+export const DEMO_SUBSCRIPTION_PRODUCT_ID = 'manager247_demo_10d';
 
 type DemoExtensionRow = {
   status: string;
@@ -29,7 +30,7 @@ export async function extendOtpDemoAccess(client: SupabaseClient): Promise<DemoE
   const { data, error } = await client.rpc('extend_my_demo_after_otp');
   if (error) {
     // Dacă răspunsul primei cereri s-a pierdut după commit, reîncercarea este
-    // sigură: perioada a fost deja extinsă, iar SubscriptionProvider o recitește.
+    // sigură: perioada fixă a fost deja activată, iar SubscriptionProvider o recitește.
     if (/already used|deja (?:a fost )?folosit/i.test(error.message ?? '')) return null;
     throw error;
   }

@@ -8,11 +8,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { describe, expect, it, vi } from 'vitest';
 
-import { DEMO_ACCOUNT_EMAIL, extendOtpDemoAccess, isOtpDemoAccount } from './demo-access';
+import { extendOtpDemoAccess, isOtpDemoAccount } from './demo-access';
 
 describe('OTP demo access', () => {
   it('recognizes only the dedicated demo address', () => {
-    expect(isOtpDemoAccount(`  ${DEMO_ACCOUNT_EMAIL.toUpperCase()}  `)).toBe(true);
+    expect(isOtpDemoAccount('  DEMO@PARADIM.RO  ')).toBe(true);
+    expect(isOtpDemoAccount('paul.nemesu@paradim.ro')).toBe(false);
     expect(isOtpDemoAccount('paul.nemesu@gmail.com')).toBe(false);
     expect(isOtpDemoAccount(undefined)).toBe(false);
   });
