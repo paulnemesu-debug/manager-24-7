@@ -28,6 +28,8 @@ TDD: four new regressions failed before the fix. Final focused tests: 8/8 PASS. 
 
 JDK 17, Android SDK/build tools/platform 36, NDK 27.1.12297006 and CMake 3.30.5 were prepared. The local Gradle 9.3.1 download is blocked by the inherited proxy with HTTP 403 CONNECT for `services.gradle.org`. No alternate route was used to bypass that denial.
 
-EAS CLI 27.2.0 reports `Not logged in`. The `production-apk` profile uses remote signing credentials and remains the supported alternate build route after Expo account authentication. The existing production key was not changed. A temporary unused local test signer was removed after the local-build blocker; no artifact was signed with it.
+Expo device authentication subsequently succeeded as `paradimoperations`, limited to the `paradimoperationss-team` organization. EAS project `22034007-9c26-4d6f-9f33-4908b8a05acb` and the remote production Supabase URL/public key were verified. The `production-apk` profile uses the existing remote Android credentials. The existing production key was not changed. A temporary unused local test signer was removed after the local-build blocker; no artifact was signed with it.
+
+The preceding failed EAS build `5fb967bf-2abc-42b1-b947-ade2ed87aa17` stopped at the Sentry upload task with `An organization ID or slug is required`. Sentry is not configured in this project. Both Android production profiles now set `SENTRY_DISABLE_AUTO_UPLOAD=true` to skip that build-time upload; the runtime SDK and its configuration are unchanged. The installed Sentry Gradle task checks this exact flag. Existing release-config, Android-artifact and crash-privacy tests: 40/40 PASS; `git diff --check` PASS.
 
 Before delivery: complete an ARM64 native build with the intended signer, verify the final APK's ABI/version/signature, and test installation and launch. A web ZIP, source checkpoint or passing source tests is not a replacement APK.

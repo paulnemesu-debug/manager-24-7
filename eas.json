@@ -38,6 +38,7 @@
       "environment": "production",
       "env": {
         "NODE_ENV": "production",
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true",
         "GRADLE_OPTS": "-Dorg.gradle.jvmargs=\"-XX:MaxMetaspaceSize=768m -Xmx3g -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8\" -Dorg.gradle.parallel=false -Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2",
         "EXPO_PUBLIC_APP_ENV": "production",
         "EXPO_PUBLIC_GOOGLE_PLAY_SUBSCRIPTION_ID": "professional_foodcost_pro",
@@ -55,6 +56,7 @@
       "environment": "production",
       "env": {
         "NODE_ENV": "production",
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true",
         "GRADLE_OPTS": "-Dorg.gradle.jvmargs=\"-XX:MaxMetaspaceSize=768m -Xmx3g -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8\" -Dorg.gradle.parallel=false -Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2",
         "EXPO_PUBLIC_APP_ENV": "production",
         "EXPO_PUBLIC_GOOGLE_PLAY_SUBSCRIPTION_ID": "professional_foodcost_pro",
