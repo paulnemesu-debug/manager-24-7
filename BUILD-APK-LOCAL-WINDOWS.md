@@ -87,7 +87,8 @@ npm run qa:android-release -- C:\cale\catre\manager24-7-release.apk
 ```
 
 Comanda acceptă numai pachetul `ro.paradim.professionalfoodcost`, versiunea
-`1.6.5`, codul `64` și certificatul de release aprobat.
+`1.6.5`, codul `66`, ABI-ul `arm64-v8a` și certificatul cheii existente EAS
+`production-apk`, documentat în `RELEASE-1.6.5.md`.
 
 ## Folosirea aceleiași chei ca EAS (opțional)
 

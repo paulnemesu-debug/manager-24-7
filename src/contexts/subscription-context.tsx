@@ -11,7 +11,9 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 
@@ -25,6 +27,7 @@ import {
   writeEntitlementSnapshot,
 } from '@/lib/subscription-cache';
 import { isDemoMode, supabase } from '@/lib/supabase';
+import { withStorageLock } from '@/lib/storage-lock';
 
 export type SubscriptionStatus =
   | 'active'
@@ -63,8 +66,36 @@ const EMPTY_SNAPSHOT: EntitlementSnapshot = {
   serverAllowed: false,
 };
 
+function createSubscriptionScope(key: string) {
+  let active = true;
+  let generation = 0;
+  return { key, isActive: () => active, currentGeneration: () => generation,
+    isCurrent: (expected: number) => active && generation === expected,
+    activate: () => { active = true; },
+    deactivate: () => { active = false; generation += 1; } };
+}
+
 export function SubscriptionProvider({ children }: PropsWithChildren) {
   const { user, isAuthenticated, isDemo } = useAuth();
+  const scope = useMemo(() => createSubscriptionScope(`${user?.id ?? 'anonymous'}:${isAuthenticated}:${isDemo}`),
+    [user?.id, isAuthenticated, isDemo]);
+  useLayoutEffect(() => {
+    scope.activate();
+    return scope.deactivate;
+  }, [scope]);
+
+  // Remount before children can observe the previous account's entitlement.
+  return <SubscriptionSessionProvider key={scope.key} scope={scope}>
+    {children}
+  </SubscriptionSessionProvider>;
+}
+
+function SubscriptionSessionProvider({ children, scope }: PropsWithChildren<{
+  scope: ReturnType<typeof createSubscriptionScope>;
+}>) {
+  const { user, isAuthenticated, isDemo } = useAuth();
+  const refreshSequence = useRef(0);
+  const validatedSnapshot = useRef<{ sequence: number; snapshot: EntitlementSnapshot } | null>(null);
   const [snapshot, setSnapshot] = useState<EntitlementSnapshot>(isDemoMode ? {
     ...EMPTY_SNAPSHOT,
     status: 'active',
@@ -75,6 +106,11 @@ export function SubscriptionProvider({ children }: PropsWithChildren) {
   const [expiryTick, setExpiryTick] = useState(0);
 
   const refresh = useCallback(async () => {
+    if (!scope.isActive()) return;
+    const scopeGeneration = scope.currentGeneration();
+    const sequence = ++refreshSequence.current;
+    const isCurrent = () => scope.isCurrent(scopeGeneration)
+      && refreshSequence.current === sequence;
     if (isDemoMode || isDemo) {
       setSnapshot({
         ...EMPTY_SNAPSHOT,
@@ -92,12 +128,22 @@ export function SubscriptionProvider({ children }: PropsWithChildren) {
     }
 
     const cached = await readEntitlementSnapshot(user.id).catch(() => null);
-    if (cached) {
-      setSnapshot(cached);
+    if (!isCurrent()) return;
+    // An older disk grant cannot replace a server denial, even if saving it failed.
+    const fallback = validatedSnapshot.current?.snapshot ?? cached;
+    if (fallback) {
+      setSnapshot(fallback);
       setIsLoading(false);
     } else {
       setIsLoading(true);
     }
+
+    const persist = (next: EntitlementSnapshot) => withStorageLock(`entitlement:${user.id}`, async () => {
+      // Starting another refresh does not invalidate the last accepted server result.
+      if (scope.isCurrent(scopeGeneration) && validatedSnapshot.current?.sequence === sequence) {
+        await writeEntitlementSnapshot(user.id, next);
+      }
+    });
 
     try {
       // Rolul din profil este sursa de adevăr pentru accesul de administrator;
@@ -110,12 +156,14 @@ export function SubscriptionProvider({ children }: PropsWithChildren) {
           .eq('user_id', user.id)
           .maybeSingle(),
       ]);
+      if (!isCurrent()) return;
 
       // Primul OTP de email proaspăt activează zece zile pentru contul demo.
       // Serverul păstrează aceeași dată de expirare la autentificările următoare.
       if (!accessResult.error && accessResult.data !== true && isOtpDemoAccount(user.email)) {
         try {
           await extendOtpDemoAccess(supabase);
+          if (!isCurrent()) return;
           [accessResult, subscriptionResult] = await Promise.all([
             supabase.rpc('has_professional_access'),
             supabase
@@ -129,6 +177,7 @@ export function SubscriptionProvider({ children }: PropsWithChildren) {
           // inițial, iar utilizatorul rămâne pe ecranul de acces expirat.
         }
       }
+      if (!isCurrent()) return;
 
       // An explicit server refusal is authoritative even when optional
       // profile/subscription metadata is unavailable. Persist it before those
@@ -141,8 +190,9 @@ export function SubscriptionProvider({ children }: PropsWithChildren) {
           periodEnd: subscriptionResult.data?.current_period_end ?? null,
           checkedAt: new Date().toISOString(),
         };
+        validatedSnapshot.current = { sequence, snapshot: denied };
         setSnapshot(denied);
-        await writeEntitlementSnapshot(user.id, denied);
+        await persist(denied);
         return;
       }
 
@@ -156,6 +206,7 @@ export function SubscriptionProvider({ children }: PropsWithChildren) {
           .limit(1)
           .maybeSingle(),
       ]);
+      if (!isCurrent()) return;
 
       if (accessResult.error || profileResult.error || subscriptionResult.error) {
         throw accessResult.error ?? profileResult.error ?? subscriptionResult.error;
@@ -172,29 +223,33 @@ export function SubscriptionProvider({ children }: PropsWithChildren) {
         checkedAt: new Date().toISOString(),
         serverAllowed: accessResult.data === true,
       };
+      validatedSnapshot.current = { sequence, snapshot: next };
       setSnapshot(next);
-      await writeEntitlementSnapshot(user.id, next);
+      await persist(next);
     } catch {
       // Fără internet păstrăm ultima validare locală; lease-ul de 7 zile
       // împiedică transformarea cache-ului într-un acces permanent.
-      if (!cached) setSnapshot(EMPTY_SNAPSHOT);
+      if (isCurrent() && !fallback && !validatedSnapshot.current) setSnapshot(EMPTY_SNAPSHOT);
     } finally {
-      setIsLoading(false);
+      if (isCurrent()) setIsLoading(false);
     }
-  }, [isDemo, user]);
+  }, [isDemo, user, scope]);
 
   useEffect(() => {
     if (isAuthenticated) {
       // Evită un ecran de încărcare infinit; accesul rămâne însă condiționat
       // de ultima validare server și de lease-ul offline limitat.
-      const loadingFallback = setTimeout(() => setIsLoading(false), 6000);
+      const generation = scope.currentGeneration();
+      const loadingFallback = setTimeout(() => {
+        if (scope.isCurrent(generation)) setIsLoading(false);
+      }, 6000);
       void refresh().finally(() => clearTimeout(loadingFallback));
       return () => clearTimeout(loadingFallback);
     } else {
       setSnapshot(EMPTY_SNAPSHOT);
       setIsLoading(false);
     }
-  }, [isAuthenticated, refresh]);
+  }, [isAuthenticated, refresh, scope]);
 
   const hasAccess = isDemoMode || isDemo || hasEntitlementAccess(snapshot);
 

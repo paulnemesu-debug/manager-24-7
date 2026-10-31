@@ -37,12 +37,20 @@ const verifier = require('../../scripts/qa/check-android-release-artifact.cjs') 
 };
 
 describe('Android publishable-artifact gate', () => {
+  it('accepts the signer independently verified in EAS production-apk and the generated APK', () => {
+    expect(verifier.validateReleaseIdentity({
+      ...verifier.EXPECTED_RELEASE,
+      certificateSha256: 'B7125F9E38BD66BA1226B0FF063D15569320006F3B193A1DA297D485DEEEC3ED',
+      nativeAbis: ['arm64-v8a'],
+    })).toEqual([]);
+  });
+
   it('parses the package/version/native ABIs and normalizes the signer digest', () => {
     expect(verifier.parseAaptBadging(
-      "package: name='ro.paradim.professionalfoodcost' versionCode='65' versionName='1.6.5' platformBuildVersionName='16'\nnative-code: 'arm64-v8a' 'x86_64'\n",
+      "package: name='ro.paradim.professionalfoodcost' versionCode='66' versionName='1.6.5' platformBuildVersionName='16'\nnative-code: 'arm64-v8a' 'x86_64'\n",
     )).toEqual({
       packageName: 'ro.paradim.professionalfoodcost',
-      versionCode: '65',
+      versionCode: '66',
       versionName: '1.6.5',
       nativeAbis: ['arm64-v8a', 'x86_64'],
     });
@@ -67,7 +75,7 @@ describe('Android publishable-artifact gate', () => {
     expect(failures).toEqual([
       'package expected ro.paradim.professionalfoodcost, received com.example.newapp',
       'versionName expected 1.6.5, received 1.6.4',
-      'versionCode expected 65, received 63',
+      'versionCode expected 66, received 63',
       'certificate SHA-256 does not match the approved release certificate',
     ]);
   });
@@ -75,7 +83,7 @@ describe('Android publishable-artifact gate', () => {
   it('rejects an emulator-only APK even when its update identity and certificate match', () => {
     const actual = {
       ...verifier.parseAaptBadging(
-        "package: name='ro.paradim.professionalfoodcost' versionCode='65' versionName='1.6.5'\nnative-code: 'x86_64'\n",
+        "package: name='ro.paradim.professionalfoodcost' versionCode='66' versionName='1.6.5'\nnative-code: 'x86_64'\n",
       ),
       certificateSha256: verifier.EXPECTED_RELEASE.certificateSha256,
     };
@@ -91,7 +99,7 @@ describe('Android publishable-artifact gate', () => {
   ])('fails closed when native ABI badging is %s', (_description, nativeCode) => {
     const actual = {
       ...verifier.parseAaptBadging(
-        `package: name='ro.paradim.professionalfoodcost' versionCode='65' versionName='1.6.5'\n${nativeCode}\n`,
+        `package: name='ro.paradim.professionalfoodcost' versionCode='66' versionName='1.6.5'\n${nativeCode}\n`,
       ),
       certificateSha256: verifier.EXPECTED_RELEASE.certificateSha256,
     };
@@ -107,7 +115,7 @@ describe('Android publishable-artifact gate', () => {
   ])('accepts a matching %s APK with ARM64 phone support', (_description, nativeCode) => {
     const actual = {
       ...verifier.parseAaptBadging(
-        `package: name='ro.paradim.professionalfoodcost' versionCode='65' versionName='1.6.5'\n${nativeCode}\n`,
+        `package: name='ro.paradim.professionalfoodcost' versionCode='66' versionName='1.6.5'\n${nativeCode}\n`,
       ),
       certificateSha256: verifier.EXPECTED_RELEASE.certificateSha256,
     };

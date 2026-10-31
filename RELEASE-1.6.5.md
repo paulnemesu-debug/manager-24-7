@@ -1,12 +1,21 @@
 # MANAGER 24/7 v1.6.5 — candidat Android
 
-Identitate Android păstrată pentru actualizarea utilizatorilor existenți:
+Identitate Android pentru APK-ul distribuit direct:
 
 - package: `ro.paradim.professionalfoodcost`;
 - version name: `1.6.5`;
-- version code: `64`;
+- version code: `66`;
 - produs Google Play: `professional_foodcost_pro`;
-- certificat SHA-256 așteptat pentru artefactul publicabil: `DD64E216CA5F7D1E0E05349F8A0D2DD8E54A5F5C22688E620EC287D496FBEF1E`.
+- certificat SHA-256 pentru cheia existentă EAS `production-apk`: `B7125F9E38BD66BA1226B0FF063D15569320006F3B193A1DA297D485DEEEC3ED`.
+
+Pe 31 octombrie 2026, metadatele autentificate EAS pentru proiectul
+`22034007-9c26-4d6f-9f33-4908b8a05acb`, aplicația de mai sus și configurația
+implicită `Build Credentials LGkkPJqexu` au confirmat certificatul B712…,
+identic cu APK-ul build 65. Cheia era configurată de două luni și nu a fost
+înlocuită. Valoarea DD64… din planul inițial nu are în repo o verificare
+independentă legată de un binar anterior; nu mai este folosită ca etalon pentru
+APK-ul direct. Compatibilitatea cu o instalare veche semnată cu altă cheie și
+certificatul Google Play App Signing necesită verificare separată.
 
 ## Modificări incluse
 
@@ -16,6 +25,7 @@ Identitate Android păstrată pentru actualizarea utilizatorilor existenți:
 - cumpărarea și restaurarea abonamentului folosesc Google Play Billing 9.1;
 - accesul este actualizat numai după verificarea server-side a achiziției;
 - tokenurile de cumpărare nu sunt afișate, logate sau confirmate local;
+- corecția de izolare a abonamentului la schimbarea contului respinge răspunsurile și cache-ul întârziat ale sesiunii precedente;
 - pachetul local de test este numit explicit `manager24-7-v1.6.5-local-test.apk`.
 
 ## Gate de semnare
@@ -26,7 +36,8 @@ Rulează pentru APK-ul obținut cu credentialele remote de release:
 npm run qa:android-release -- <cale-apk>
 ```
 
-Verificarea eșuează dacă package-ul, versiunea, codul sau certificatul diferă.
+Verificarea eșuează dacă package-ul, versiunea, codul, certificatul sau ABI-ul
+ARM64 necesar telefonului diferă. Nu dezactivează verificarea semnăturii.
 Un APK semnat local cu cheia de test este util pentru emulator/dispozitiv, dar
 nu este publicabil și nu trebuie încărcat pe site ca versiune oficială.
 
