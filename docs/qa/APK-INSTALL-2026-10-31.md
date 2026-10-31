@@ -76,8 +76,23 @@ Git provenance shows DD64… first in plan commit `fcc40b9`, then copied into th
 
 A further runtime defect was reproduced: an in-flight subscription refresh from account A could publish A's admin/access snapshot after switching to account B. The corrected provider resets at the account/auth/demo boundary, invalidates old continuations, orders accepted cache writes, and preserves the newest validated server snapshot over stale disk cache, including failed persistence followed by offline refresh. Nine initial regressions and two cache regressions failed before their fixes; all pass afterwards. Targeted auth/subscription/cache/DEMO checks: 54 tests PASS, typecheck and lint PASS. Review found no other confirmed cross-account provider defect.
 
-Android versionCode is incremented to 66 for an update from build 65 using the same existing EAS signing key. The embedded updater is disabled, so this runtime correction requires a new APK. Build 65's valid signature does not imply it already contains this runtime correction. No new EAS build is claimed until a concrete build ID and result are recorded.
+Android versionCode is incremented to 66 for an update from build 65 using the same existing EAS signing key. The embedded updater is disabled, so this runtime correction requires a new APK. Build 65's valid signature does not imply it already contains this runtime correction; the separate build 66 and its result are recorded below.
 
 Final review also reproduced a grant being cleared when the initial cache was empty and saving an accepted server result failed. A third cache regression failed before a one-line catch correction and passed afterwards. The final subscription/DEMO subset passed 27 tests; twelve new session-isolation regressions are included overall.
 
 After that final correction, full `npm run qa:release` passed: 920 tests in 115 files, typecheck, lint, operational checks and local database checks. The official EAS CLI `build:download --build-id ...` also successfully retrieved the existing build 65; its 50,037,105 bytes and SHA-256 exactly match the user's upload. The earlier generic HTTP/browser download failures therefore do not prevent retrieval through the supported authenticated CLI, and no second user upload is needed for the next build's local audit.
+
+## Final build 66: built and locally verified
+
+- Exactly one new EAS build was started for this final repair: `7ea4f242-e71d-4faa-b9dd-6ff3b9eac47e`, profile `production-apk`, source `602c928c6a0d162ef1a7d13f235782f12c17ace2`.
+- EAS status `FINISHED`, completed `2026-10-31T19:22:50.408Z`; `assembleRelease` and `BUILD SUCCESSFUL` are confirmed in the remote log. `SentryUpload` is `SKIPPED` as configured.
+- Retrieved through the official authenticated EAS CLI, without a second user upload or any new/changed signing key.
+- Final file: `manager247-v1.6.5-build66-arm64.apk`, 50,039,729 bytes.
+- SHA-256: `5fea63c0699ae1b6d09364258004634ca3847ae9e6f923ea3389fd933635d072`.
+- Actual identity: package `ro.paradim.professionalfoodcost`, version 1.6.5/code 66, ABI `arm64-v8a`, signer SHA-256 `B7125F9E38BD66BA1226B0FF063D15569320006F3B193A1DA297D485DEEEC3ED`.
+- Strict `qa:android-release` identity gate: PASS with no failures. SDK `apksigner` verifies v2/RSA-2048 signature, matching the build 65 certificate and authenticated EAS keystore metadata.
+- Independent audit: ZIP CRC PASS, 28/28 ELF64 AArch64 libraries, all 84 `PT_LOAD` segments and ZIP native entries aligned to 16 KiB; SDK zipalign PASS.
+- Hermes v98 bytecode contains the production Supabase URL and the exact verified public publishable key. No secret values were printed.
+- The shared web export was rebuilt from the same corrected source: 54 files, no source maps or environment files. ZIP `manager247-v1.6.5-build66-web-secure-602c928.zip`, 6,070,379 bytes, SHA-256 `2befc341f5c093d92971f1f0055855d25c6efc6b8340fa65ff041aaf23ff9be0`. Its production URL/key and ZIP CRC pass. This is an updated distributable, not a claim of deployment.
+
+The confirmed defects are corrected and automated/static checks pass. Physical installation, launch, genuine OTP delivery/login and a real Google Play purchase remain unconfirmed; automated tests use service/native adapters. This record does not declare every feature tested on a phone or the Google Play release ready.
