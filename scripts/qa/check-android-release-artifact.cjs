@@ -9,6 +9,7 @@ const EXPECTED_RELEASE = Object.freeze({
   versionName: '1.6.5',
   versionCode: '65',
   certificateSha256: 'DD64E216CA5F7D1E0E05349F8A0D2DD8E54A5F5C22688E620EC287D496FBEF1E',
+  requiredNativeAbi: 'arm64-v8a',
 });
 
 function normalizeDigest(value) {
@@ -16,12 +17,15 @@ function normalizeDigest(value) {
 }
 
 function parseAaptBadging(output) {
-  const line = String(output).split(/\r?\n/).find((entry) => entry.startsWith('package:')) ?? '';
+  const lines = String(output).split(/\r?\n/);
+  const line = lines.find((entry) => entry.startsWith('package:')) ?? '';
+  const nativeCodeLine = lines.find((entry) => entry.startsWith('native-code:')) ?? '';
   const read = (name) => line.match(new RegExp(`${name}='([^']*)'`))?.[1] ?? '';
   return {
     packageName: read('name'),
     versionCode: read('versionCode'),
     versionName: read('versionName'),
+    nativeAbis: Array.from(nativeCodeLine.matchAll(/'([^']+)'/g), (match) => match[1]),
   };
 }
 
@@ -43,6 +47,10 @@ function validateReleaseIdentity(actual) {
   }
   if (normalizeDigest(actual.certificateSha256) !== EXPECTED_RELEASE.certificateSha256) {
     failures.push('certificate SHA-256 does not match the approved release certificate');
+  }
+  const nativeAbis = Array.isArray(actual.nativeAbis) ? actual.nativeAbis : [];
+  if (!nativeAbis.includes(EXPECTED_RELEASE.requiredNativeAbi)) {
+    failures.push(`native ABI ${EXPECTED_RELEASE.requiredNativeAbi} required for phone release; received ${nativeAbis.join(', ') || 'none'}`);
   }
   return failures;
 }
