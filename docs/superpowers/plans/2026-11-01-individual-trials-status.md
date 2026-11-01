@@ -1,0 +1,19 @@
+# Individual trial release checkpoint
+
+Core source commit:66f088dfd7c49934e6d3ee7e719f64504704db48. Version1.6.6/build67 prepared; no new APK exists.
+
+Implemented and tested: ownemail OTP reuse; trusted server firstsignin one fixed240hour window; restaurant/terms2026-11-01/privacyack before grant; user-owned fictional recipe/location and local HR/P&L/document samples; admin-only roster; restrictive expiry gates across30operationaltables; originalpaid/admin preserved; legacytrialRPCallowancesdenied; admin@paradimoperations.com verified-only ownerallowlist.
+
+Production Supabase mnaaibsmijziutxuluvv migration individual_trials APPLIED success. MigrationSHA256ff148e5ec2bfe3cf74bf8b2ceefbf82f460761245dcc5e0baac69fbed77cd353. Postapplymetadataverified9RPC/permission/RLS/allowlistchecks incl30restrictivepolicies.
+
+959frontendtests, typecheck, focusedrelease31 and movedroutescreen6, databaseQA pipelineincl22trialSQL+9notificationtests pass. Full52migration baseline validatedlocally. Existingstagingempty2tables:230KBbaselinecall silent858.9s then aborted, remainedunchanged; remote stagingverificationNOTcomplete.
+
+Ownerupdateautomationcreated:Activitate testeri Manager24/7, dailyconditionwatch08:00Europe/Bucharest beginning2026-11-02. Reports newregisteredverifiedaccounts/recentlogins in currentconversationonly, noIPs/tokens/marketing/emails. Notificationoutbox+Resendfunctionsourcepreparedbut no actualdispatcher/mailconfiguration/deliveryverified.
+
+WebsiteexistingSitesprojectappgprj_6a6c1274d95c819180fde9177174c827: newclientmounted/aplicatie/, sourcecompiled13.5MB, private/noindex; ROENlegalupdated, contactadmin@..., independentbrowsertrialCTA, oldAPKdownloadendpointpreservedwithoutadvertisingoldshared-demo. Websitepublicationinprogressinroot.
+
+Googlechecks:admin@paradimoperations.com hasnoaccessibleGSCpropertyand0BusinessProfiles; oldownerpaul.nemesu@gmail.comsavedbutsignedout. GoogleVerifyitsyoumanualreauthneeded; no duplicateassets/permissionschanged.
+
+BLOCK: EASAPKcloudbuildcommandrejectedbyautomaticapprovalreviewbecauseuploadofproprietarysource toapi.expo.dev notexplicitlyapprovedinthisrequest. DoNOTretryuntiluserexplicitlyapprovesthattransfer+build. ExistingEASaccountauthenticatedparadimoperations/owneroffparadimoperationss-team; no newloginneeded.
+
+RealOTPdelivery/nativeinteractionnotverified; livewebbrowserQA ongoing. No automatic90dayerasurepromisedorconfigured.
