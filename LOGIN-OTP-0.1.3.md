@@ -18,7 +18,7 @@ APK-ul nu pot primi codul de șase cifre.
 
 1. Intră în contul Zoho al adresei `paul.nemesu@paradim.ro`.
 2. Deschide **Zoho Accounts → Security → App Passwords**.
-3. Generează o parolă nouă cu numele `Supabase FoodCost` și copiaz-o imediat.
+3. Generează o parolă nouă cu numele `Supabase Manager 24-7` și copiaz-o imediat.
    Nu folosi parola obișnuită a căsuței poștale.
 4. În Zoho Mail deschide **Settings → Mail Accounts → Server Configuration** și
    verifică serverul afișat pentru acel cont. Pentru un cont organizațional

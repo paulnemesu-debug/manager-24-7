@@ -79,7 +79,7 @@ Subiect: `Link-ul tău Manager 24/7`
 ```html
 <p>Salut,</p>
 
-<p>Deschide FoodCost cu un click (expiră în 60 de minute):<br>
+<p>Deschide Manager 24/7 cu un click (expiră în 60 de minute):<br>
 <a href="{{ .ConfirmationURL }}">{{ .ConfirmationURL }}</a></p>
 
 <p>Sau introdu în aplicație codul:<br>
