@@ -611,8 +611,8 @@ const ro = {
   'nutrition.exportEstimated': 'estimată',
   'nutrition.exportDefrosted': 'Produs decongelat',
 
-  'paywall.openSite': 'Continuă pe paradim.ro',
-  'paywall.openSiteHint': 'Abonamentul se activează pe site, cu aceeași adresă de email cu care ești autentificat aici.',
+  'paywall.openSite': 'Solicită abonament',
+  'paywall.openSiteHint': 'Se deschide o cerere prin e-mail. Plata online va fi disponibilă după activarea procesatorului; echipa PARADIM îți confirmă pașii pentru abonament. Fără debitare automată.',
   'paywall.alreadyPaid': 'Am plătit deja',
 
   'editor.catalogPick': 'Alege din baza de ingrediente',
@@ -1822,8 +1822,8 @@ const en: Record<TranslationKey, string> = {
   'nutrition.exportEstimated': 'estimated',
   'nutrition.exportDefrosted': 'Defrosted product',
 
-  'paywall.openSite': 'Continue on paradim.ro',
-  'paywall.openSiteHint': 'The subscription is activated on the website, using the same email address you signed in with here.',
+  'paywall.openSite': 'Request subscription',
+  'paywall.openSiteHint': 'This opens an email request. Online payment will be available after the processor is activated; the PARADIM team will confirm the subscription steps. No automatic charges.',
   'paywall.alreadyPaid': 'I already paid',
 
   'editor.catalogPick': 'Pick from the ingredient library',

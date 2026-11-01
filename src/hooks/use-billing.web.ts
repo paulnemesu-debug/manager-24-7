@@ -19,7 +19,7 @@ export function useBilling(): BillingState {
     connected: false,
     isLoading: false,
     displayPrice: null,
-    error: 'Abonamentul Google Play este disponibil în aplicația Android.',
+    error: null,
     buy: async () => undefined,
     restore: async () => undefined,
   };

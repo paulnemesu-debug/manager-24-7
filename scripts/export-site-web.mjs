@@ -5,7 +5,7 @@ import path from 'node:path';
 // An explicit base path keeps this client separate from the PARADIM website.
 const prefix = '/aplicatie';
 const output = path.resolve('dist-site');
-const run = spawnSync(process.execPath, ['node_modules/expo/bin/cli', 'export', '--platform', 'web', '--output-dir', output, '--max-workers', '2'], {
+const run = spawnSync(process.execPath, ['node_modules/expo/bin/cli', 'export', '--clear', '--platform', 'web', '--output-dir', output, '--max-workers', '2'], {
   stdio: 'inherit', env: { ...process.env, NODE_ENV: 'production', MANAGER247_WEB_BASE_URL: prefix },
 });
 if (run.status !== 0) process.exit(run.status ?? 1);

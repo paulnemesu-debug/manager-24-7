@@ -52,7 +52,8 @@ export const INSTALL_URL = 'https://foodcost.paradim.ro/install.html';
 export const AUTH_CALLBACK_URL = 'https://foodcost.paradim.ro/auth/callback';
 export const APP_SCHEME_CALLBACK = 'manager247://auth/callback';
 
-export const CHECKOUT_URL = 'https://paradim.ro/foodcost-pro';
+/** A user-initiated request until an online payment processor is activated. */
+export const CHECKOUT_URL = 'mailto:admin@paradimoperations.com?subject=Manager24%2F7%20subscription%20request';
 
 /** Prețurile publice pot fi schimbate din EAS fără o nouă modificare de cod. */
 export const MONTHLY_PRICE_RON = process.env.EXPO_PUBLIC_MONTHLY_PRICE_RON?.trim() || '99';

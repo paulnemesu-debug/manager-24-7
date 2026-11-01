@@ -8,8 +8,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Redirect, useRouter } from 'expo-router';
-import * as WebBrowser from 'expo-web-browser';
-import { Alert, Linking, Platform, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, StyleSheet, Text, View } from 'react-native';
 
 import { AppButton, BrandHeader, Card, Screen, Subtitle, Title } from '@/components/ui';
 import {
@@ -47,11 +46,7 @@ export default function PaywallScreen() {
   if (!subscription.isLoading && subscription.hasAccess) return <Redirect href="/(app)" />;
 
   const openCheckout = () => {
-    const url = auth.user?.email
-      ? `${CHECKOUT_URL}?email=${encodeURIComponent(auth.user.email)}`
-      : CHECKOUT_URL;
-    if (Platform.OS === 'web') void Linking.openURL(url);
-    else void WebBrowser.openBrowserAsync(url);
+    void Linking.openURL(CHECKOUT_URL).catch(() => Alert.alert(t('common.tryAgain')));
   };
 
   const activate = async () => {
