@@ -9,7 +9,7 @@ import { locationErrorMessage } from '@/lib/locations-repository';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Linking, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { FolderHub, FolderSection } from '@/components/folder-section';
 import { ChoiceRow } from '@/components/inputs';
@@ -27,6 +27,7 @@ import { SUPPORTED_CURRENCIES } from '@/lib/format';
 import { exportAccountData } from '@/lib/account-export';
 import { AccountCleanupError } from '@/lib/account-deletion-cleanup';
 import { restoreSubscriptionAccess } from '@/lib/subscription-restore';
+import { trialLegalUrl, TRIAL_PRODUCT_ID } from '@/lib/trial-registration';
 import {
   addLocation,
   listLocations,
@@ -117,10 +118,10 @@ export default function AccountScreen() {
     )}>
       <FolderSection id="account" icon="person-circle-outline" photo="account" accent="navy"
         title={locale === 'ro' ? 'Contul meu' : 'My account'}
-        summary={auth.user?.email ?? 'demo@paradim.ro'}>
+        summary={auth.user?.email ?? (locale === 'ro' ? 'Demonstrație locală' : 'Local demonstration')}>
         <Card tone="navy">
           <SectionHeader title={locale === 'ro' ? 'Profil și locație' : 'Profile and location'} light />
-          <Text style={styles.accountEmail}>{auth.user?.email ?? 'demo@paradim.ro'}</Text>
+          <Text style={styles.accountEmail}>{auth.user?.email ?? (locale === 'ro' ? 'Demonstrație locală' : 'Local demonstration')}</Text>
         </Card>
 
         {!subscription.isViewer && (
@@ -162,6 +163,7 @@ export default function AccountScreen() {
           <Card tone="gold">
             <SectionHeader eyebrow={t('account.adminEyebrow')} title={t('account.adminTitle')} />
             <Body>{t('account.adminBody')}</Body>
+            <AppButton label={locale === 'ro' ? 'Utilizatori trial' : 'Trial users'} icon="people-outline" onPress={() => router.push('/admin-trials')} />
           </Card>
         )}
 
@@ -191,8 +193,9 @@ export default function AccountScreen() {
               : subscription.isAdmin ? t('account.adminBadge') : t(`subscription.${subscription.status}`)}
             status={subscription.hasAccess ? 'healthy' : 'critical'}
           />
-          <Text style={styles.accountEmail}>{auth.user?.email ?? 'demo@paradim.ro'}</Text>
+          <Text style={styles.accountEmail}>{auth.user?.email ?? (locale === 'ro' ? 'Demonstrație locală' : 'Local demonstration')}</Text>
           {!!subscription.periodEnd && !subscription.isAdmin && <Body light>{t('account.periodEnd', { date: format.date(subscription.periodEnd) })}</Body>}
+          {subscription.productId === TRIAL_PRODUCT_ID && <TrialCountdown expiresAt={subscription.periodEnd} locale={locale} />}
         </Card>
         {!BETA_ACCESS && !auth.isDemo && !subscription.isAdmin && (
           <Card>
@@ -221,6 +224,8 @@ export default function AccountScreen() {
           <Info icon="lock-closed-outline" text={t('account.security1')} />
           <Info icon="cloud-done-outline" text={t('account.security2')} />
           <Info icon="card-outline" text={t('account.security3')} />
+          <AppButton label={locale === 'ro' ? 'Termenii trialului' : 'Trial Terms'} variant="ghost" onPress={() => { void Linking.openURL(trialLegalUrl('terms', locale)).catch(() => Alert.alert(t('common.tryAgain'))); }} />
+          <AppButton label={locale === 'ro' ? 'Informarea privind confidențialitatea' : 'Privacy Notice'} variant="ghost" onPress={() => { void Linking.openURL(trialLegalUrl('privacy', locale)).catch(() => Alert.alert(t('common.tryAgain'))); }} />
         </Card>
 
         <Card>
@@ -273,6 +278,20 @@ export default function AccountScreen() {
       </FolderSection>
     </FolderHub>
   );
+}
+
+function TrialCountdown({ expiresAt, locale }: { expiresAt: string | null; locale: 'ro' | 'en' }) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const remaining = Math.max(0, Date.parse(expiresAt ?? '') - now);
+  const hours = Math.floor(remaining / 3_600_000);
+  const minutes = Math.floor(remaining % 3_600_000 / 60_000);
+  return <Body light>{!Number.isFinite(remaining) || remaining <= 0
+    ? (locale === 'ro' ? 'Trial expirat. Nu se efectuează nicio debitare automată.' : 'Trial expired. There are no automatic charges.')
+    : `${locale === 'ro' ? 'Trial rămas' : 'Trial remaining'}: ${hours}h ${minutes}m. ${locale === 'ro' ? 'Fără debitare automată.' : 'No automatic charges.'}`}</Body>;
 }
 
 function LocationsCard({ userId, isAdmin }: { userId: string; isAdmin: boolean }) {

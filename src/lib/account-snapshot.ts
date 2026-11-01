@@ -39,6 +39,7 @@ const LOCAL_MODULES = {
   autocontrolNotifications: 'manager247.haccp_autocontrol.notifications.v1.',
   weeklyReminderEnabled: 'manager247.weekly_report_reminders.enabled.v1.',
   weeklyReminderEntries: 'manager247.weekly_report_reminders.v1.',
+  trialSeed: 'manager247.trial-seed.v1.',
 };
 
 type TableSpec = { name: string; owner?: string; order?: string[]; columns?: string };

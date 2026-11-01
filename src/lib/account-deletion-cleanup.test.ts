@@ -40,6 +40,7 @@ const ownKeys = [
   `professional_foodcost.entitlement.v1.${userId}`, `manager247.onboarding.v1.${userId}`,
   `manager247.production-plan.v1.${userId}`, `professional_foodcost.sales.2026-10-01.v1.${userId}`,
   `manager247.pnl_reports.recovery.v1.${userId}`,
+  `manager247.trial-seed.v1.${userId}`,
 ];
 const client = {
   auth: {

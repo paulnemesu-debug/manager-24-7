@@ -3,14 +3,14 @@
   "description": "MANAGER 24/7™ by PARADIM — platformă proprietară pentru management operațional HoReCa.",
   "author": {
     "name": "Marius Paul Nemeșu / PARADIM Operations SRL",
-    "email": "contact@paradim.ro",
+    "email": "admin@paradimoperations.com",
     "url": "https://www.paradim.ro"
   },
   "copyright": "Copyright © 2026 PARADIM Operations SRL. Toate drepturile rezervate.",
   "license": "SEE LICENSE IN LICENSE-PROPRIETARY.md",
   "homepage": "https://www.paradim.ro",
   "main": "expo-router/entry",
-  "version": "1.6.5",
+  "version": "1.6.6",
   "dependencies": {
     "@expo-google-fonts/manrope": "^0.4.2",
     "@expo/ui": "~57.0.26",
@@ -84,9 +84,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "qa:flows": "node scripts/qa/check-folders.cjs && node scripts/qa/check-draft-flows.cjs && node scripts/qa/check-auth-haccp.cjs && node scripts/qa/check-nutrition-flows.cjs && node scripts/qa/check-commercial-flows.cjs && node scripts/qa/check-operational-flows.cjs && node scripts/qa/check-operations-remediation.cjs",
-    "qa:database": "node scripts/qa/check-google-purchases.cjs && node scripts/qa/check-workspace-security.mjs && node scripts/qa/check-demo-ten-days.mjs",
+    "qa:database": "node scripts/qa/check-google-purchases.cjs && node scripts/qa/check-workspace-security.mjs && node scripts/qa/check-demo-ten-days.mjs && node scripts/qa/check-individual-trials.mjs && node --test tests/notify-trial-owner.test.mjs",
     "qa:release": "npm run typecheck && npm run lint && npm test && npm run qa:flows && npm run qa:database",
-    "qa:android-release": "node scripts/qa/check-android-release-artifact.cjs"
+    "qa:android-release": "node scripts/qa/check-android-release-artifact.cjs",
+    "export:site-web": "node scripts/export-site-web.mjs"
   },
   "overrides": {
     "decode-uri-component": "0.5.1"

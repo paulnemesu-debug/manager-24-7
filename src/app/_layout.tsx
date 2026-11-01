@@ -21,6 +21,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppErrorBoundary } from '@/components/app-error-boundary';
 import { OperationalAccessBoundary } from '@/components/operational-access-boundary';
+import { TrialRegistrationBoundary } from '@/components/trial-registration-boundary';
 import { PlatformAlerts } from '@/components/platform-alerts';
 import { installClientErrorHandler } from '@/lib/client-errors';
 
@@ -28,6 +29,7 @@ import { AuthProvider } from '@/contexts/auth-context';
 import { LocaleProvider, useI18n } from '@/contexts/locale-context';
 import { PreferencesProvider } from '@/contexts/preferences-context';
 import { SubscriptionProvider } from '@/contexts/subscription-context';
+import { TrialRegistrationProvider } from '@/contexts/trial-registration-context';
 import { WorkspaceProvider } from '@/contexts/workspace-context';
 import { BillingProvider } from '@/hooks/use-billing';
 
@@ -36,7 +38,7 @@ void SplashScreen.preventAutoHideAsync().catch(() => undefined);
 function AppNavigator() {
   const { t } = useI18n();
   return (
-    <OperationalAccessBoundary><WorkspaceProvider>
+    <TrialRegistrationBoundary><OperationalAccessBoundary><WorkspaceProvider>
       <Head>
         <title>Manager 24/7 by PARADIM</title>
         <meta name="description" content={t('operational.shared.description')} />
@@ -53,6 +55,8 @@ function AppNavigator() {
         <Stack.Screen name="index" />
         <Stack.Screen name="sign-in" />
         <Stack.Screen name="onboarding" />
+        <Stack.Screen name="trial-registration" />
+        <Stack.Screen name="admin-trials" />
         <Stack.Screen name="auth/callback" />
         <Stack.Screen name="paywall" />
         <Stack.Screen name="location-setup" />
@@ -81,7 +85,7 @@ function AppNavigator() {
         <Stack.Screen name="tools/daily-manager" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="tools/efactura" options={{ animation: 'slide_from_right' }} />
       </Stack>
-    </WorkspaceProvider></OperationalAccessBoundary>
+    </WorkspaceProvider></OperationalAccessBoundary></TrialRegistrationBoundary>
   );
 }
 
@@ -131,10 +135,12 @@ function RootLayout() {
           <AuthProvider>
             <PreferencesProvider>
               <SubscriptionProvider>
+                <TrialRegistrationProvider>
                 <BillingProvider>
                   <PlatformAlerts />
                   <AppNavigator />
                 </BillingProvider>
+                </TrialRegistrationProvider>
               </SubscriptionProvider>
             </PreferencesProvider>
           </AuthProvider>

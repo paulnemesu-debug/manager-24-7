@@ -38,13 +38,13 @@ describe('Android release invariants', () => {
     const pkg = JSON.parse(read('package.json'));
     const gradle = read('android/app/build.gradle');
     const eas = JSON.parse(read('eas.json'));
-    expect(app.expo.version).toBe('1.6.5');
+    expect(app.expo.version).toBe('1.6.6');
     expect(pkg.version).toBe(app.expo.version);
     expect(app.expo.android.package).toBe('ro.paradim.professionalfoodcost');
-    expect(app.expo.android.versionCode).toBe(66);
+    expect(app.expo.android.versionCode).toBe(67);
     expect(gradle).toContain("applicationId 'ro.paradim.professionalfoodcost'");
-    expect(gradle).toContain('versionName "1.6.5"');
-    expect(gradle).toContain('versionCode 66');
+    expect(gradle).toContain('versionName "1.6.6"');
+    expect(gradle).toContain('versionCode 67');
     expect(eas.cli.appVersionSource).toBe('local');
     expect(eas.build.production.autoIncrement).toBe(false);
     expect(eas.build['production-apk'].autoIncrement).toBe(false);
@@ -324,9 +324,6 @@ describe('Android release invariants', () => {
     expect(signIn).toContain("router.replace('/')");
     expect(signIn).not.toContain('hasCompletedOnboarding');
     expect(signIn).toContain('!loading');
-    expect(read('src/contexts/subscription-context.tsx')).toContain('extendOtpDemoAccess(supabase)');
-    expect(read('supabase/migrations/20260920181813_demo_3d_otp_extension.sql'))
-      .toContain('function public.extend_my_demo_after_otp()');
     expect(signIn).not.toContain("import { Redirect } from 'expo-router'");
     expect(entry).not.toContain('<Redirect');
     expect(onboarding).toContain('<Screen bottomSafeArea forceLight>');

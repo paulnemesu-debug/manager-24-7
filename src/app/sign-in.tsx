@@ -9,7 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, AppState, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Alert, AppState, Linking, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import { OtpInput } from '@/components/otp-input';
 import { AppButton, BrandHeader, Field, LoadingState, Screen } from '@/components/ui';
@@ -19,6 +19,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { useI18n } from '@/contexts/locale-context';
 import type { TranslationKey } from '@/i18n/translations';
 import { authErrorKey, isAcceptedOtpLength, isValidEmail, normalizeEmail, OTP_RESEND_SECONDS, parseOtpInput, resendSeconds } from '@/lib/email-otp';
+import { trialLegalUrl } from '@/lib/trial-registration';
 
 function currentTimestamp(): number {
   return Date.now();
@@ -230,7 +231,14 @@ export default function SignInScreen() {
               <Text style={styles.errorText}>{t(errorKey)}</Text>
             </View>
           )}
-          <Text style={styles.legal}>{t('signIn.legal')}</Text>
+          <Text style={styles.legal}>{locale === 'ro'
+            ? 'Folosim e-mailul pentru verificare și acces. Cele 10 zile încep la prima autentificare verificată. Înregistrarea trialului include acceptarea termenilor, fără card sau debitare automată.'
+            : 'We use your email for verification and access. Your 10 days begin at the first verified sign-in. Trial registration includes accepting the terms, with no card or automatic charges.'}</Text>
+          <Text style={styles.legal}>
+            <Text accessibilityRole="link" onPress={() => { void Linking.openURL(trialLegalUrl('terms', locale)).catch(() => setErrorKey('signIn.networkError')); }}>{locale === 'ro' ? 'Termenii trialului' : 'Trial Terms'}</Text>
+            {' · '}
+            <Text accessibilityRole="link" onPress={() => { void Linking.openURL(trialLegalUrl('privacy', locale)).catch(() => setErrorKey('signIn.networkError')); }}>{locale === 'ro' ? 'Confidențialitate' : 'Privacy Notice'}</Text>
+          </Text>
         </View>
         <Text style={styles.version}>Manager 24/7 · v{appVersion}</Text>
         <Text style={styles.copyright}>{locale === 'en' ? COPYRIGHT_NOTICE_EN : COPYRIGHT_NOTICE}</Text>

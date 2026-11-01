@@ -18,7 +18,8 @@ import {
 } from 'react';
 
 import { useAuth } from '@/contexts/auth-context';
-import { DEMO_SUBSCRIPTION_PRODUCT_ID, extendOtpDemoAccess, isOtpDemoAccount } from '@/lib/demo-access';
+import { DEMO_SUBSCRIPTION_PRODUCT_ID } from '@/lib/demo-access';
+import { TRIAL_PRODUCT_ID } from '@/lib/trial-registration';
 import {
   hasEntitlementAccess,
   OFFLINE_ENTITLEMENT_DAYS,
@@ -148,7 +149,7 @@ function SubscriptionSessionProvider({ children, scope }: PropsWithChildren<{
     try {
       // Rolul din profil este sursa de adevăr pentru accesul de administrator;
       // el este acordat pe server și nu poate fi modificat din aplicație.
-      let [accessResult, subscriptionResult] = await Promise.all([
+      const [accessResult, subscriptionResult] = await Promise.all([
         supabase.rpc('has_professional_access'),
         supabase
           .from('subscriptions')
@@ -156,27 +157,6 @@ function SubscriptionSessionProvider({ children, scope }: PropsWithChildren<{
           .eq('user_id', user.id)
           .maybeSingle(),
       ]);
-      if (!isCurrent()) return;
-
-      // Primul OTP de email proaspăt activează zece zile pentru contul demo.
-      // Serverul păstrează aceeași dată de expirare la autentificările următoare.
-      if (!accessResult.error && accessResult.data !== true && isOtpDemoAccount(user.email)) {
-        try {
-          await extendOtpDemoAccess(supabase);
-          if (!isCurrent()) return;
-          [accessResult, subscriptionResult] = await Promise.all([
-            supabase.rpc('has_professional_access'),
-            supabase
-              .from('subscriptions')
-              .select('status, product_id, current_period_end')
-              .eq('user_id', user.id)
-              .maybeSingle(),
-          ]);
-        } catch {
-          // Un token vechi nu activează accesul. Continuăm cu răspunsul
-          // inițial, iar utilizatorul rămâne pe ecranul de acces expirat.
-        }
-      }
       if (!isCurrent()) return;
 
       // An explicit server refusal is authoritative even when optional
@@ -254,7 +234,8 @@ function SubscriptionSessionProvider({ children, scope }: PropsWithChildren<{
   const hasAccess = isDemoMode || isDemo || hasEntitlementAccess(snapshot);
 
   useEffect(() => {
-    if (isDemoMode || isDemo || !isAuthenticated || snapshot.productId !== DEMO_SUBSCRIPTION_PRODUCT_ID) return;
+    if (isDemoMode || isDemo || !isAuthenticated
+      || ![DEMO_SUBSCRIPTION_PRODUCT_ID, TRIAL_PRODUCT_ID].includes(snapshot.productId ?? '')) return;
     const periodEnd = new Date(snapshot.periodEnd ?? '').getTime();
     const checkedAt = new Date(snapshot.checkedAt).getTime();
     const leaseEnd = checkedAt + OFFLINE_ENTITLEMENT_DAYS * 24 * 60 * 60 * 1000 + 1;

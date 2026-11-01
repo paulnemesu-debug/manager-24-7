@@ -1,0 +1,40 @@
+import React from 'react';
+import { act, create } from 'react-test-renderer';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+const state = vi.hoisted(() => ({ complete: vi.fn(async () => {}), userId: 'a' }));
+vi.mock('react-native', () => ({ Pressable: 'Pressable', StyleSheet: { create: (value: unknown) => value }, Text: 'Text', View: 'View', Linking: { openURL: async () => {} }, Platform: { OS: 'web', select: (value: { default: unknown }) => value.default } }));
+vi.mock('expo-router', () => ({ Redirect: 'Redirect' }));
+vi.mock('expo-web-browser', () => ({ openBrowserAsync: async () => {} }));
+vi.mock('@/components/ui', () => ({ Screen: 'Screen', LoadingState: 'LoadingState', Card: 'Card', Body: 'Body', AppButton: 'AppButton', Field: 'Field', BrandHeader: 'BrandHeader', Title: 'Title' }));
+vi.mock('@/contexts/auth-context', () => ({ useAuth: () => ({ user: { id: state.userId, email: `${state.userId}@example.invalid` }, isAuthenticated: true, isLoading: false, signOut: async () => {} }) }));
+vi.mock('@/contexts/locale-context', () => ({ useI18n: () => ({ locale: 'en' }) }));
+vi.mock('@/contexts/trial-registration-context', () => ({ useTrialRegistration: () => ({ registration: { registered: false, eligible: true, started_at: '2026-11-01T12:00:00Z', expires_at: '2026-11-11T12:00:00Z' }, isLoading: false, error: false, complete: state.complete, reload: async () => {} }) }));
+import TrialRegistrationScreen from '@/app/trial-registration';
+const trees: ReturnType<typeof create>[] = [];
+beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); state.complete.mockClear(); state.userId = 'a'; });
+afterEach(async () => { await act(async () => { trees.splice(0).forEach((tree) => tree.unmount()); }); vi.unstubAllGlobals(); });
+async function render() { let tree: ReturnType<typeof create>; await act(async () => { tree = create(<TrialRegistrationScreen />); trees.push(tree); }); return tree!; }
+it('requires restaurant and the trial terms while privacy notice is visible and marketing is not bundled', async () => {
+  const tree = await render();
+  const submit = () => tree.root.findAllByType('AppButton' as never).find((item) => item.props.label === 'Open my trial')!;
+  expect(submit().props.disabled).toBe(true);
+  const field = tree.root.findByType('Field' as never);
+  await act(async () => { field.props.onChangeText('Bistro Tester'); });
+  expect(submit().props.disabled).toBe(true);
+  const checkbox = tree.root.findByProps({ accessibilityRole: 'checkbox' });
+  expect(checkbox.props.accessibilityState.checked).toBe(false);
+  await act(async () => { checkbox.props.onPress(); });
+  expect(submit().props.disabled).toBe(false);
+  await act(async () => { await submit().props.onPress(); });
+  expect(state.complete).toHaveBeenCalledWith('Bistro Tester', true, 'en');
+  expect(JSON.stringify(tree.toJSON())).toContain('Privacy Notice');
+  expect(tree.root.findAllByProps({ accessibilityRole: 'checkbox' })).toHaveLength(1);
+});
+it('clears another account restaurant and legal acceptance on account switch', async () => {
+  const tree = await render();
+  await act(async () => { tree.root.findByType('Field' as never).props.onChangeText('Account A restaurant'); tree.root.findByProps({ accessibilityRole: 'checkbox' }).props.onPress(); });
+  state.userId = 'b';
+  await act(async () => { tree.update(<TrialRegistrationScreen />); });
+  expect(tree.root.findByType('Field' as never).props.value).toBe('');
+  expect(tree.root.findByProps({ accessibilityRole: 'checkbox' }).props.accessibilityState.checked).toBe(false);
+});

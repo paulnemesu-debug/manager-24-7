@@ -9,6 +9,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { SubscriptionStatus } from '@/contexts/subscription-context';
 import { DEMO_SUBSCRIPTION_PRODUCT_ID } from '@/lib/demo-access';
+import { TRIAL_PRODUCT_ID } from '@/lib/trial-registration';
 
 export type EntitlementSnapshot = {
   status: SubscriptionStatus;
@@ -39,7 +40,7 @@ export function hasEntitlementAccess(
   now = Date.now(),
 ): boolean {
   if (snapshot.serverAllowed !== true || !isEntitlementLeaseValid(snapshot, now)) return false;
-  if (snapshot.productId === DEMO_SUBSCRIPTION_PRODUCT_ID) {
+  if (snapshot.productId === DEMO_SUBSCRIPTION_PRODUCT_ID || snapshot.productId === TRIAL_PRODUCT_ID) {
     const periodEnd = new Date(snapshot.periodEnd ?? '').getTime();
     return Number.isFinite(periodEnd) && now < periodEnd;
   }
