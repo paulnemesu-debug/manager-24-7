@@ -57,9 +57,9 @@ async function checkBaseline(baseline) {
   const initial = readFileSync(resolve(migrationsDirectory, '20260826000000_initial_recipe_schema.sql'), 'utf8');
   const db = new PGlite();
   const scalar = async (sql, args = []) => (await db.query(sql, args)).rows[0]?.value;
-  const denied = async (sql, args = []) => {
+  const denied = async (sql, args = [], pattern = /row-level security|permission denied/) => {
     await db.exec('savepoint expected_gate_denial;');
-    await assert.rejects(db.query(sql, args), /row-level security|permission denied/);
+    await assert.rejects(db.query(sql, args), pattern);
     await db.exec('rollback to savepoint expected_gate_denial; release savepoint expected_gate_denial;');
   };
   await db.exec(`
@@ -145,6 +145,101 @@ async function checkBaseline(baseline) {
     await db.exec('savepoint private_registry_check;');
     await assert.rejects(db.query('select * from private.individual_trial_registrations'), /permission denied/);
     await db.exec('rollback to savepoint private_registry_check; release savepoint private_registry_check;');
+    // Both accounts are entitled at the same time. Positive own-row controls
+    // make each foreign-row denial meaningful rather than testing an empty DB
+    // or an account that has no access to anything. Roll back this entire block
+    // before exercising intentionally shared viewer access below.
+    await db.exec('savepoint bilateral_trial_isolation; reset role;');
+    const isolationChecks = [];
+    const verify = async (name, check) => { await check(); isolationChecks.push(name); };
+    const as = async (id, role = 'authenticated') => {
+      await db.exec('reset role;');
+      await db.query("select set_config('request.jwt.claims',$1,true)", [JSON.stringify({ sub: id, role })]);
+      await db.exec('set local role ' + role);
+    };
+    await as(other);
+    const secondTrial = await scalar("select public.complete_my_trial_registration('Second isolated fictional cafe','2026-11-01','2026-11-01') as value");
+    assert.notEqual(secondTrial.location_id, registered.location_id);
+    await db.query("insert into public.hr_employees(user_id,name) values($1,'Second fictional employee')", [other]);
+    await db.query("insert into public.haccp_equipment(user_id,name,kind) values($1,'Second fictional fridge','cold')", [other]);
+    const tables = [
+      ['recipes', 'user_id', 1], ['recipe_ingredients', 'user_id', 2],
+      ['ingredient_catalog', 'user_id', 2], ['business_locations', 'owner_user_id', 1],
+      ['hr_employees', 'user_id', 1], ['haccp_equipment', 'user_id', 1],
+    ];
+    const ownershipDenial = /row-level security|permission denied|foreign key constraint|belongs to another|must belong|same owner|own recipe|Subrecipe|hr_owner_mismatch/i;
+    for (const [caller, foreign, ownTrial] of [[tester, other, registered], [other, tester, secondTrial]]) {
+      await as(caller);
+      await verify(caller + ': current caller registration only', async () => {
+        const mine = await scalar('select public.get_my_trial_registration() as value');
+        assert.equal(mine.location_id, ownTrial.location_id);
+        assert.equal(mine.restaurant_name, ownTrial.restaurant_name);
+        assert.equal(mine.registered, true);
+        assert.equal(await scalar('select public.has_professional_access() as value'), true);
+      });
+      for (const [table, key, expected] of tables) {
+        await verify(caller + ': own ' + table + ' read', async () =>
+          assert.equal(await scalar(`select count(*)::int as value from public.${table} where ${key}=$1`, [caller]), expected));
+        await verify(caller + ': foreign ' + table + ' read denied', async () =>
+          assert.equal(await scalar(`select count(*)::int as value from public.${table} where ${key}=$1`, [foreign]), 0));
+        await verify(caller + ': foreign ' + table + ' update denied', async () =>
+          assert.equal((await db.query(`update public.${table} set updated_at=clock_timestamp() where ${key}=$1 returning id`, [foreign])).rows.length, 0));
+        await verify(caller + ': foreign ' + table + ' delete denied', async () =>
+          assert.equal((await db.query(`delete from public.${table} where ${key}=$1 returning id`, [foreign])).rows.length, 0));
+        await verify(caller + ': own ' + table + ' update works', async () =>
+          assert.equal((await db.query(`update public.${table} set updated_at=clock_timestamp() where ${key}=$1 returning id`, [caller])).rows.length, expected));
+        await verify(caller + ': ' + table + ' owner reassignment denied', () =>
+          denied(`update public.${table} set ${key}=$1 where ${key}=$2`, [foreign, caller], ownershipDenial));
+      }
+      await verify(caller + ': foreign-owner insert denied', () =>
+        denied("insert into public.hr_employees(user_id,name) values($1,'Spoofed owner')", [foreign], ownershipDenial));
+      await verify(caller + ': private registry direct read denied', () => denied('select * from private.individual_trial_registrations'));
+      await verify(caller + ': private notification direct read denied', () => denied('select * from private.trial_owner_notifications'));
+      await verify(caller + ': non-admin roster denied', () => denied('select public.admin_list_trial_users()', [], /admin|permission denied/i));
+      await db.exec('reset role;');
+      const foreignRecipe = await scalar('select id as value from public.recipes where user_id=$1 limit 1', [foreign]);
+      const foreignCatalog = await scalar('select id as value from public.ingredient_catalog where user_id=$1 limit 1', [foreign]);
+      await as(caller);
+      await verify(caller + ': foreign recipe parent denied', () =>
+        denied('update public.recipe_ingredients set recipe_id=$1 where user_id=$2', [foreignRecipe, caller], ownershipDenial));
+      await verify(caller + ': foreign ingredient catalog denied', () =>
+        denied('update public.recipe_ingredients set ingredient_catalog_id=$1 where user_id=$2', [foreignCatalog, caller], ownershipDenial));
+      await verify(caller + ': foreign subrecipe denied', () =>
+        denied('update public.recipe_ingredients set subrecipe_id=$1 where user_id=$2', [foreignRecipe, caller], ownershipDenial));
+    }
+    await db.exec('reset role;');
+    await db.query("update private.individual_trial_registrations set started_at=now()-interval '11 days',expires_at=now()-interval '1 day' where user_id=$1", [tester]);
+    await db.query("update public.subscriptions set current_period_start=now()-interval '11 days',current_period_end=now()-interval '1 day' where user_id=$1", [tester]);
+    await as(tester);
+    await verify('first trial expires independently', async () => {
+      assert.equal(await scalar('select public.has_professional_access() as value'), false);
+      for (const [table] of tables) assert.equal(await scalar(`select count(*)::int as value from public.${table}`), 0);
+    });
+    await as(other);
+    await verify('second trial retains independent access', async () => {
+      assert.equal(await scalar('select public.has_professional_access() as value'), true);
+      for (const [table, key, expected] of tables)
+        assert.equal(await scalar(`select count(*)::int as value from public.${table} where ${key}=$1`, [other]), expected);
+    });
+    await as(null, 'anon');
+    await verify('anonymous registration and roster denied', async () => {
+      await denied('select public.get_my_trial_registration()');
+      await denied('select public.admin_list_trial_users()');
+      await denied('select * from private.individual_trial_registrations');
+      await denied('select * from private.trial_owner_notifications');
+    });
+    await db.exec('reset role;');
+    const functionCodeHashes = (await db.query(`
+      select n.nspname as schema,p.oid::regprocedure::text as signature,md5(p.prosrc) as source_md5
+      from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      where n.nspname in ('public','private') and p.proname in (
+        'get_my_trial_registration','complete_my_trial_registration','admin_list_trial_users',
+        'user_has_nontrial_entitlement','user_has_professional_access','has_professional_access',
+        'is_active_viewer_of','observe_individual_trial','capture_individual_trial_sign_in',
+        'claim_trial_owner_notifications','finish_trial_owner_notification')
+      order by n.nspname,p.oid::regprocedure::text
+    `)).rows;
+    await db.exec('rollback to savepoint bilateral_trial_isolation; release savepoint bilateral_trial_isolation;');
     await db.exec('reset role;');
     await db.query("select set_config('request.jwt.claims',$1,true)", [JSON.stringify({ sub: other, role: 'authenticated' })]);
     await db.exec('set local role authenticated;');
@@ -214,7 +309,8 @@ async function checkBaseline(baseline) {
     await db.exec('rollback;');
     return { passed: true, migrationCount: sources.length, fullFoodcostTriggers: true, realOwnerRls: true,
       viewerExpiryRls: true, verifiedPrimaryAdminTrigger: true, operationalReadWriteGate: true,
-      paidAdminAccessPreserved: true, hostedOperations: 0 };
+      paidAdminAccessPreserved: true, bilateralIsolation: { passed: isolationChecks.length, checks: isolationChecks },
+      functionCodeHashes, hostedOperations: 0 };
   } finally {
     await db.close();
   }
