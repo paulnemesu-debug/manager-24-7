@@ -101,7 +101,19 @@ async function checkBaseline(baseline) {
     const trialName = readdirSync(migrationsDirectory).find((name) => name.endsWith('_individual_trials.sql'));
     assert.ok(trialName, 'individual-trial migration is missing');
     await db.exec(readFileSync(resolve(migrationsDirectory, trialName), 'utf8'));
+    const auditRlsName = readdirSync(migrationsDirectory).find((name) => name.endsWith('_harden_private_audit_rls.sql'));
+    assert.ok(auditRlsName, 'private-audit RLS migration is missing');
+    await db.exec(readFileSync(resolve(migrationsDirectory, auditRlsName), 'utf8'));
     await db.exec('begin;');
+    const privateAuditChecks = [];
+    for (const table of ['account_deletion_audit', 'demo_otp_extensions', 'subscription_access_audit']) {
+      assert.equal(await scalar('select relrowsecurity as value from pg_class where oid=$1::regclass', ['private.' + table]), true, table + ' must enable RLS');
+      privateAuditChecks.push(table + ': RLS enabled');
+      for (const role of ['anon', 'authenticated', 'service_role']) {
+        assert.equal(await scalar("select has_table_privilege($1,$2,'SELECT,INSERT,UPDATE,DELETE') as value", [role, 'private.' + table]), false, role + ' must not gain direct audit access');
+        privateAuditChecks.push(table + ': no direct ' + role + ' privilege');
+      }
+    }
     const tester = '11111111-1111-4111-8111-111111111111';
     const other = '22222222-2222-4222-8222-222222222222';
     const owner = '33333333-3333-4333-8333-333333333333';
@@ -306,11 +318,28 @@ async function checkBaseline(baseline) {
     for (const table of ['hr_employees', 'haccp_equipment', 'business_locations']) {
       assert.equal(await scalar(`select count(*)::int as value from public.${table}`), 1);
     }
+    await db.exec('reset role;');
+    const auditRowsBefore = await scalar('select count(*)::int as value from private.subscription_access_audit');
+    assert.equal((await scalar("select private.activate_manual_subscription('tester@example.invalid',30,'Local RLS regression') as value")).status, 'active');
+    assert.equal(await scalar('select count(*)::int as value from private.subscription_access_audit'), auditRowsBefore + 1);
+    privateAuditChecks.push('trusted manual activation still writes its audit');
+    assert.equal((await scalar("select private.deactivate_manual_subscription('tester@example.invalid','Local RLS regression') as value")).status, 'expired');
+    assert.equal(await scalar('select count(*)::int as value from private.subscription_access_audit'), auditRowsBefore + 2);
+    privateAuditChecks.push('trusted manual deactivation still writes its audit');
+    const deletionRowsBefore = await scalar('select count(*)::int as value from private.account_deletion_audit');
+    const deletionFixture = '55555555-5555-4555-8555-555555555555';
+    await db.query("insert into auth.users(id,email,email_confirmed_at,last_sign_in_at) values($1,'audit-delete@example.invalid',clock_timestamp(),clock_timestamp())", [deletionFixture]);
+    await db.exec('set local role service_role;');
+    await db.query("select public.purge_own_data($1,'audit-delete@example.invalid')", [deletionFixture]);
+    await db.exec('reset role;');
+    assert.equal(await scalar('select count(*)::int as value from private.account_deletion_audit'), deletionRowsBefore + 1);
+    assert.equal(await scalar('select count(*)::int as value from public.profiles where user_id=$1', [deletionFixture]), 0);
+    privateAuditChecks.push('service-only account purge still writes its audit');
     await db.exec('rollback;');
     return { passed: true, migrationCount: sources.length, fullFoodcostTriggers: true, realOwnerRls: true,
       viewerExpiryRls: true, verifiedPrimaryAdminTrigger: true, operationalReadWriteGate: true,
       paidAdminAccessPreserved: true, bilateralIsolation: { passed: isolationChecks.length, checks: isolationChecks },
-      functionCodeHashes, hostedOperations: 0 };
+      functionCodeHashes, privateAuditRls: { passed: privateAuditChecks.length, checks: privateAuditChecks }, hostedOperations: 0 };
   } finally {
     await db.close();
   }
