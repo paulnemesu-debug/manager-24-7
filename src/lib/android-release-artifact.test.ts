@@ -37,21 +37,36 @@ const verifier = require('../../scripts/qa/check-android-release-artifact.cjs') 
 };
 
 describe('Android publishable-artifact gate', () => {
-  it('accepts the signer independently verified in EAS production-apk and the generated APK', () => {
+  it('accepts release 1.6.6 build 67 with the independently verified production signer', () => {
     expect(verifier.validateReleaseIdentity({
-      ...verifier.EXPECTED_RELEASE,
+      packageName: 'ro.paradim.professionalfoodcost',
+      versionName: '1.6.6',
+      versionCode: '67',
       certificateSha256: 'B7125F9E38BD66BA1226B0FF063D15569320006F3B193A1DA297D485DEEEC3ED',
       nativeAbis: ['arm64-v8a'],
     })).toEqual([]);
   });
 
+  it('rejects the previous release 1.6.5 build 66 despite its matching package, signer and ABI', () => {
+    expect(verifier.validateReleaseIdentity({
+      packageName: 'ro.paradim.professionalfoodcost',
+      versionName: '1.6.5',
+      versionCode: '66',
+      certificateSha256: 'B7125F9E38BD66BA1226B0FF063D15569320006F3B193A1DA297D485DEEEC3ED',
+      nativeAbis: ['arm64-v8a'],
+    })).toEqual([
+      'versionName expected 1.6.6, received 1.6.5',
+      'versionCode expected 67, received 66',
+    ]);
+  });
+
   it('parses the package/version/native ABIs and normalizes the signer digest', () => {
     expect(verifier.parseAaptBadging(
-      "package: name='ro.paradim.professionalfoodcost' versionCode='66' versionName='1.6.5' platformBuildVersionName='16'\nnative-code: 'arm64-v8a' 'x86_64'\n",
+      "package: name='ro.paradim.professionalfoodcost' versionCode='67' versionName='1.6.6' platformBuildVersionName='16'\nnative-code: 'arm64-v8a' 'x86_64'\n",
     )).toEqual({
       packageName: 'ro.paradim.professionalfoodcost',
-      versionCode: '66',
-      versionName: '1.6.5',
+      versionCode: '67',
+      versionName: '1.6.6',
       nativeAbis: ['arm64-v8a', 'x86_64'],
     });
     expect(verifier.parseSignerCertificate(
@@ -74,8 +89,8 @@ describe('Android publishable-artifact gate', () => {
     });
     expect(failures).toEqual([
       'package expected ro.paradim.professionalfoodcost, received com.example.newapp',
-      'versionName expected 1.6.5, received 1.6.4',
-      'versionCode expected 66, received 63',
+      'versionName expected 1.6.6, received 1.6.4',
+      'versionCode expected 67, received 63',
       'certificate SHA-256 does not match the approved release certificate',
     ]);
   });
@@ -83,7 +98,7 @@ describe('Android publishable-artifact gate', () => {
   it('rejects an emulator-only APK even when its update identity and certificate match', () => {
     const actual = {
       ...verifier.parseAaptBadging(
-        "package: name='ro.paradim.professionalfoodcost' versionCode='66' versionName='1.6.5'\nnative-code: 'x86_64'\n",
+        "package: name='ro.paradim.professionalfoodcost' versionCode='67' versionName='1.6.6'\nnative-code: 'x86_64'\n",
       ),
       certificateSha256: verifier.EXPECTED_RELEASE.certificateSha256,
     };
@@ -99,7 +114,7 @@ describe('Android publishable-artifact gate', () => {
   ])('fails closed when native ABI badging is %s', (_description, nativeCode) => {
     const actual = {
       ...verifier.parseAaptBadging(
-        `package: name='ro.paradim.professionalfoodcost' versionCode='66' versionName='1.6.5'\n${nativeCode}\n`,
+        `package: name='ro.paradim.professionalfoodcost' versionCode='67' versionName='1.6.6'\n${nativeCode}\n`,
       ),
       certificateSha256: verifier.EXPECTED_RELEASE.certificateSha256,
     };
@@ -115,7 +130,7 @@ describe('Android publishable-artifact gate', () => {
   ])('accepts a matching %s APK with ARM64 phone support', (_description, nativeCode) => {
     const actual = {
       ...verifier.parseAaptBadging(
-        `package: name='ro.paradim.professionalfoodcost' versionCode='66' versionName='1.6.5'\n${nativeCode}\n`,
+        `package: name='ro.paradim.professionalfoodcost' versionCode='67' versionName='1.6.6'\n${nativeCode}\n`,
       ),
       certificateSha256: verifier.EXPECTED_RELEASE.certificateSha256,
     };
