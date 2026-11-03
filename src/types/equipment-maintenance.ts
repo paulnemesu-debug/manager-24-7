@@ -1,0 +1,38 @@
+import type { OperationalSync } from '@/lib/operational-sync';
+export type EquipmentAsset = OperationalSync & {
+    id: string;
+    name: string;
+    available: boolean;
+    brand: string;
+    location: string;
+    model: string;
+    serial: string;
+    provider: string;
+    acquisitionDate: string;
+    warrantyDate: string;
+    manual: string;
+    photo: string;
+    notes: string;
+    updatedAt: string;
+    haccp?: boolean;
+};
+export type MaintenanceEntry = OperationalSync & {
+    id: string;
+    assetId: string;
+    kind: 'cleaning' | 'upkeep' | 'preventive' | 'repair';
+    title: string;
+    responsible: string;
+    dueDate: string;
+    recurrenceDays: number;
+    completedDate: string;
+    estimatedParts: number;
+    estimatedLabor: number;
+    estimatedTravel: number;
+    estimatedConsumables: number;
+    actualParts: number | null;
+    actualLabor: number | null;
+    actualTravel: number | null;
+    actualConsumables: number | null;
+    notes: string;
+    updatedAt: string;
+};
