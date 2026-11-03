@@ -15,7 +15,7 @@ import { Stack } from 'expo-router';
 import Head from 'expo-router/head';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { Appearance, StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -35,15 +35,28 @@ import { BillingProvider } from '@/hooks/use-billing';
 
 void SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
+function renderAccessLayout({ children }: { children: ReactNode }) {
+  // Keep the root navigator registered while access checks load or redirect.
+  // Protected screens and workspace effects still wait for both checks.
+  return (
+    <TrialRegistrationBoundary>
+      <OperationalAccessBoundary>
+        <WorkspaceProvider>{children}</WorkspaceProvider>
+      </OperationalAccessBoundary>
+    </TrialRegistrationBoundary>
+  );
+}
+
 function AppNavigator() {
   const { t } = useI18n();
   return (
-    <TrialRegistrationBoundary><OperationalAccessBoundary><WorkspaceProvider>
+    <>
       <Head>
         <title>Manager 24/7 by PARADIM</title>
         <meta name="description" content={t('operational.shared.description')} />
       </Head>
       <Stack
+        layout={renderAccessLayout}
         screenOptions={{
           headerShown: false,
           // Tranzițiile cu alpha dintre redirectările login -> home pot lăsa
@@ -87,7 +100,7 @@ function AppNavigator() {
         <Stack.Screen name="tools/daily-manager" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="tools/efactura" options={{ animation: 'slide_from_right' }} />
       </Stack>
-    </WorkspaceProvider></OperationalAccessBoundary></TrialRegistrationBoundary>
+    </>
   );
 }
 

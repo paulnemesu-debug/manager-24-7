@@ -10,16 +10,46 @@ type Diagnostic = { id: string; createdAt: string; appVersion: string; platform:
   properties: ReturnType<typeof sanitiseClientError> };
 const keyFor = (userId: string) => 'manager247.client_errors.v1.' + userId;
 
+// Fixed categories only: exception messages can contain customer data.
+function classifyError(message: string) {
+  if (message.startsWith('Maximum update depth exceeded')) return 'REACT_UPDATE_DEPTH';
+  if (message.startsWith('Too many re-renders.')) return 'REACT_RENDER_LOOP';
+  if (message.startsWith('Attempted to navigate before mounting the Root Layout')) return 'ROUTER_NOT_MOUNTED';
+  if (message.startsWith("Couldn't find a navigation object.")) return 'ROUTER_CONTEXT';
+  if (message.startsWith('Expected the first route to be __root,')) return 'ROUTER_ROOT_STATE';
+  if (message.startsWith('Text strings must be rendered within a <Text> component.')) return 'NATIVE_TEXT_CHILD';
+  if (message.startsWith('Exception in HostFunction:')) return 'NATIVE_HOST_EXCEPTION';
+  return 'UNCLASSIFIED';
+}
+
+function functionFrames(stack: string) {
+  return stack.split('\n')
+    .map((line) => line.match(/^\s*(?:at|in)\s+([A-Za-z_$][\w.$]{0,100})(?:\s|\(|$)/)?.[1])
+    .filter((frame): frame is string => Boolean(frame)).slice(0, 8).join(' > ');
+}
+
+function javascriptFrames(error: Error) {
+  // A multiline message can itself contain "at customerName (...)". Strip
+  // the entire standard error header before accepting any function frames.
+  const header = error.message ? error.name + ': ' + error.message : error.name;
+  const stack = error.stack ?? '';
+  if (!stack.startsWith(header + '\n') && !stack.startsWith(header + '\r\n')) return '';
+  return functionFrames(stack.slice(header.length));
+}
+
 /** Send categories and function names only, without messages, arguments or URLs. */
 export function sanitiseClientError(error: unknown, source: ErrorSource, fatal = false, componentStack = '') {
   const value = error instanceof Error ? error : new Error();
   const kind = ['Error', 'TypeError', 'ReferenceError', 'RangeError', 'SyntaxError', 'URIError'].includes(value.name) ? value.name : 'Error';
-  const frames = (componentStack || value.stack || '').split('\n')
-    .map((line) => line.match(/^\s*(?:at|in)\s+([A-Za-z_$][\w.$]{0,100})(?:\s|\(|$)/)?.[1])
-    .filter((frame): frame is string => Boolean(frame)).slice(0, 8).join(' > ');
+  const jsFrames = javascriptFrames(value);
+  const frames = componentStack ? functionFrames(componentStack) : jsFrames;
+  const build = Platform.OS === 'android' ? Constants.expoConfig?.android?.versionCode
+    : Platform.OS === 'ios' ? Constants.expoConfig?.ios?.buildNumber : undefined;
+  const appBuild = /^\d{1,12}$/.test(String(build)) ? String(build) : 'unknown';
   let fingerprint = 2166136261;
   for (const character of kind + source + frames) fingerprint = Math.imul(fingerprint ^ character.charCodeAt(0), 16777619);
-  return { source, kind, fatal, frames, fingerprint: (fingerprint >>> 0).toString(16) };
+  return { source, kind, fatal, frames, jsFrames, code: classifyError(value.message), appBuild,
+    fingerprint: (fingerprint >>> 0).toString(16) };
 }
 
 async function readErrors(userId: string): Promise<Diagnostic[]> {

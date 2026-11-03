@@ -34,6 +34,6 @@ describe('Manager 24/7 native billing module', () => {
     expect(billing?.projects[0]?.modules).toEqual([
       { classifier: 'expo.modules.manager247billing.Manager247BillingModule', name: null },
     ]);
-    expect(billing?.projects[0]?.sourceDir).toContain('modules/manager247-billing/android');
+    expect(billing?.projects[0]?.sourceDir.replace(/\\/g, '/')).toContain('modules/manager247-billing/android');
   });
 });

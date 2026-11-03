@@ -35,17 +35,21 @@ describe('Expo Router query dependency', () => {
         payload += '%' + high + '%' + low + 'x';
       }
       payload += '%zz';
+      const started = performance.now();
       const parsed = queryString.parse('value=' + payload);
+      if (performance.now() - started > 2500) process.exit(3);
       if (typeof parsed.value !== 'string') process.exit(2);
       process.stdout.write('decoded');
     `], {
       cwd: process.cwd(),
       encoding: 'utf8',
-      timeout: 2500,
+      // Allow Windows process startup/antivirus overhead. The child separately
+      // enforces the original 2.5-second limit around the actual decoder.
+      timeout: 30_000,
     });
 
     expect(child.error, child.error?.message).toBeUndefined();
     expect(child.status, child.stderr).toBe(0);
     expect(child.stdout).toBe('decoded');
-  });
+  }, 40_000);
 });
