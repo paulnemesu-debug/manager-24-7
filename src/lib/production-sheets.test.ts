@@ -25,6 +25,7 @@ import {
   createProductionSheetVoucher,
   importProductionSheets,
   loadProductionSheets,
+  resolveProductionSheet,
 } from "./production-sheets";
 import {
   productionSheetsGrid,
@@ -216,4 +217,21 @@ it("snapshots only reachable subrecipes", () => {
     "2026-11-03",
   );
   expect(JSON.parse(s.recipeSnapshot).subrecipes).toEqual([]);
+});
+
+it("preserves conflicts when a local draft encounters a finalized cloud sheet", async () => {
+  const s = draft();
+  s.syncState = "conflict";
+  s.remoteConflict = {
+    data: { ...s, status: "validated" },
+    version: 4,
+    updated_at: "2026-11-03T12:00:00Z",
+  };
+  cache.set("manager247.production-sheets.v1.demo", JSON.stringify([s]));
+  await expect(resolveProductionSheet("demo", s.id, "local")).rejects.toThrow();
+  const saved = JSON.parse(
+    cache.get("manager247.production-sheets.v1.demo")!,
+  )[0];
+  expect(saved.syncState).toBe("conflict");
+  expect(saved.remoteConflict.version).toBe(4);
 });

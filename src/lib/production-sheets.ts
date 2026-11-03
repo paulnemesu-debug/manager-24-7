@@ -3,8 +3,7 @@ import { normalizeQuantity } from "@/lib/calculations";
 import { buildShoppingList } from "@/lib/operations";
 import {
   createProductionDocumentId,
-  loadCachedConsumptionVouchers,
-  saveConsumptionVoucher,
+  createConsumptionVoucherOnce,
 } from "@/lib/production-documents-repository";
 import { withStorageLock } from "@/lib/storage-lock";
 import type { CatalogIngredient, Recipe } from "@/types/recipe";
@@ -21,7 +20,12 @@ const nullable = (v: unknown) => v === null || nonnegative(v);
 const text = (v: unknown): v is string =>
   typeof v === "string" && v.length <= 1000000;
 const timestamp = (v: unknown): v is string =>
-  text(v) && /^\d{4}-\d{2}-\d{2}T/.test(v) && Number.isFinite(Date.parse(v));
+  text(v) &&
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(
+    v,
+  ) &&
+  productionDateValid(v.slice(0, 10)) &&
+  Number.isFinite(Date.parse(v));
 export function normalizeProductionSheet(
   value: unknown,
 ): ProductionSheet | null {
@@ -252,7 +256,20 @@ const store = createOperationalStore<ProductionSheet>({
   normalize: normalizeProductionSheet,
 });
 export const loadProductionSheets = store.load;
-export const resolveProductionSheet = store.resolve;
+export async function resolveProductionSheet(
+  userId: string,
+  id: string,
+  choice: "local" | "remote",
+) {
+  return withStorageLock(`production-sheet-edit.${userId}`, async () => {
+    const item = (await store.cached(userId)).find((s) => s.id === id);
+    if (choice === "local" && item?.remoteConflict?.data.status === "validated")
+      throw new Error(
+        "Cloud sheet is already validated. Keep the cloud version or create a correction copy.",
+      );
+    return store.resolve(userId, id, choice);
+  });
+}
 export async function saveProductionSheet(userId: string, s: ProductionSheet) {
   return withStorageLock(`production-sheet-edit.${userId}`, async () => {
     const old = (await store.cached(userId)).find((x) => x.id === s.id);
@@ -277,11 +294,7 @@ export async function createProductionSheetVoucher(userId: string, id: string) {
     const s = (await store.cached(userId)).find((x) => x.id === id);
     if (!s || s.status !== "validated" || s.syncState === "conflict")
       throw new Error("Validate the saved sheet first");
-    const existing = (await loadCachedConsumptionVouchers(userId)).find(
-      (v) => v.id === s.voucherId,
-    );
-    if (existing) return existing;
-    return saveConsumptionVoucher(userId, {
+    return createConsumptionVoucherOnce(userId, {
       id: s.voucherId,
       documentDate: s.batchDate,
       reference: s.recipeTitle,

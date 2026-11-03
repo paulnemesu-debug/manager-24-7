@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { View } from "react-native";
 import { type Href, useLocalSearchParams, useRouter } from "expo-router";
 import { ToolHeader } from "@/components/tool-header";
@@ -12,6 +12,7 @@ import {
 } from "@/components/ui";
 import { useAuth } from "@/contexts/auth-context";
 import { useI18n } from "@/contexts/locale-context";
+import { useSubscription } from "@/contexts/subscription-context";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { loadEquipmentRegistry } from "@/lib/equipment-maintenance";
 import { localIsoDate } from "@/lib/local-date-time";
@@ -63,6 +64,7 @@ const numeric = (s: string): number | null =>
       : NaN;
 export default function ProductionSheetsScreen() {
   const router = useRouter();
+  const { isViewer } = useSubscription();
   const { user } = useAuth();
   const userId = user?.id ?? "demo";
   const { locale } = useI18n();
@@ -75,6 +77,11 @@ export default function ProductionSheetsScreen() {
   }>();
   const [sheets, setSheets] = useState<ProductionSheet[]>([]);
   const [sheet, setSheet] = useState<ProductionSheet | null>(null);
+  const [formRevision, setFormRevision] = useState(0);
+  const openSheet = useCallback((next: ProductionSheet | null) => {
+    setFormRevision((v) => v + 1);
+    setSheet(next);
+  }, []);
   const [equipment, setEquipment] = useState<
     {
       id: string;
@@ -99,7 +106,7 @@ export default function ProductionSheetsScreen() {
     setReady(false);
     setBusy(false);
     setSheets([]);
-    setSheet(null);
+    openSheet(null);
     setPreview(null);
     setEquipment([]);
     setError("");
@@ -121,10 +128,11 @@ export default function ProductionSheetsScreen() {
     return () => {
       alive = false;
     };
-  }, [userId, reload]);
+  }, [userId, reload, openSheet]);
   useEffect(() => {
     if (
       !ready ||
+      isViewer ||
       !params.recipeId ||
       prefilled.current === `${userId}:${params.recipeId}`
     )
@@ -132,7 +140,7 @@ export default function ProductionSheetsScreen() {
     const r = recipes.find((r) => r.id === params.recipeId);
     if (!r) return;
     try {
-      setSheet(
+      openSheet(
         createProductionSheet(
           r,
           recipes,
@@ -145,7 +153,17 @@ export default function ProductionSheetsScreen() {
     } catch (e) {
       setError(String(e));
     }
-  }, [ready, params.recipeId, params.portions, userId, recipes, catalog, date]);
+  }, [
+    ready,
+    params.recipeId,
+    params.portions,
+    userId,
+    recipes,
+    catalog,
+    date,
+    isViewer,
+    openSheet,
+  ]);
   const run = async (fn: () => Promise<void>) => {
     if (busy || !ready) return;
     const owner = userId;
@@ -161,13 +179,16 @@ export default function ProductionSheetsScreen() {
     }
   };
   const change = (patch: Partial<ProductionSheet>) =>
-    setSheet((s) => (s?.status === "draft" ? { ...s, ...patch } : s));
+    setSheet((s) =>
+      !isViewer && s?.status === "draft" ? { ...s, ...patch } : s,
+    );
   const save = async (s: ProductionSheet) => {
+    if (isViewer) return;
     const owner = userId;
     const saved = await saveProductionSheet(owner, s);
     const next = await loadProductionSheets(owner);
     if (active.current === owner) {
-      setSheet(saved);
+      openSheet(saved);
       setSheets(next);
     }
   };
@@ -205,7 +226,8 @@ export default function ProductionSheetsScreen() {
       />
     </View>
   );
-  const locked = sheet?.status === "validated";
+  const validated = sheet?.status === "validated";
+  const locked = validated || isViewer;
   const totals = sheet ? productionSheetTotals(sheet) : null;
   return (
     <Screen>
@@ -261,11 +283,12 @@ export default function ProductionSheetsScreen() {
             <AppButton
               key={r.id}
               label={r.title}
-              disabled={!ready || busy}
+              disabled={!ready || busy || isViewer}
               variant="secondary"
               onPress={() => {
+                if (isViewer) return;
                 try {
-                  setSheet(
+                  openSheet(
                     createProductionSheet(
                       r,
                       recipes,
@@ -295,7 +318,7 @@ export default function ProductionSheetsScreen() {
         {transfers(sheets)}
         <AppButton
           label={tr("Importă Excel / CSV", "Import Excel / CSV")}
-          disabled={!ready || busy}
+          disabled={!ready || busy || isViewer}
           onPress={() =>
             void run(async () => {
               const grid = await pickOperationsGrid();
@@ -321,10 +344,14 @@ export default function ProductionSheetsScreen() {
                 "Confirm previewed import",
               )}
               disabled={
-                busy || !!preview.errors.length || !preview.records.length
+                busy ||
+                isViewer ||
+                !!preview.errors.length ||
+                !preview.records.length
               }
               onPress={() =>
                 void run(async () => {
+                  if (isViewer) return;
                   await importProductionSheets(userId, preview.records);
                   const next = await loadProductionSheets(userId);
                   if (active.current === userId) {
@@ -346,15 +373,15 @@ export default function ProductionSheetsScreen() {
             key={s.id}
             label={`${s.batchDate} · ${s.recipeTitle} · ${s.status === "validated" ? tr("Validată", "Validated") : tr("Ciornă", "Draft")} · ${operationalSyncLabel(s, locale)}`}
             variant="secondary"
-            onPress={() => setSheet(s)}
+            onPress={() => openSheet(s)}
           />
         ))}
       </Card>
       {sheet && (
-        <Card key={sheet.id}>
+        <Card key={`${sheet.id}:${formRevision}`}>
           <SectionHeader title={`${sheet.recipeTitle} · ${sheet.batchDate}`} />
           <Body>{`${tr("Versiune rețetă", "Recipe version")}: ${sheet.recipeVersion}\n${tr("Porții planificate", "Planned portions")}: ${sheet.plannedPortions}\n${operationalSyncLabel(sheet, locale)}`}</Body>
-          {locked && (
+          {validated && (
             <Body>
               {tr(
                 "Validată: modificările se fac printr-o copie nouă.",
@@ -582,7 +609,7 @@ export default function ProductionSheetsScreen() {
             <>
               <AppButton
                 label={tr("Salvează ciorna", "Save draft")}
-                disabled={busy}
+                disabled={busy || isViewer}
                 onPress={() => void run(() => save(sheet))}
               />
               <AppButton
@@ -590,7 +617,7 @@ export default function ProductionSheetsScreen() {
                   "Validează definitiv fișa",
                   "Validate sheet permanently",
                 )}
-                disabled={busy}
+                disabled={busy || isViewer}
                 onPress={() =>
                   void run(() => save(validateProductionSheet(sheet)))
                 }
@@ -602,19 +629,20 @@ export default function ProductionSheetsScreen() {
               "Creează copie pentru corecție",
               "Create correction copy",
             )}
-            disabled={busy}
+            disabled={busy || isViewer}
             variant="secondary"
-            onPress={() => setSheet(copyProductionSheet(sheet))}
+            onPress={() => !isViewer && openSheet(copyProductionSheet(sheet))}
           />
-          {locked && (
+          {validated && (
             <AppButton
               label={tr(
                 "Creează / deschide bon de consum",
                 "Create / open consumption voucher",
               )}
-              disabled={busy}
+              disabled={busy || isViewer}
               onPress={() =>
                 void run(async () => {
+                  if (isViewer) return;
                   const v = await createProductionSheetVoucher(
                     userId,
                     sheet.id,
@@ -637,6 +665,7 @@ export default function ProductionSheetsScreen() {
             (["remote", "local"] as const).map((choice) => (
               <AppButton
                 key={choice}
+                disabled={busy || isViewer}
                 label={
                   choice === "remote"
                     ? tr("Păstrează versiunea cloud", "Keep cloud version")
@@ -644,6 +673,7 @@ export default function ProductionSheetsScreen() {
                 }
                 onPress={() =>
                   void run(async () => {
+                    if (isViewer) return;
                     const next = await resolveProductionSheet(
                       userId,
                       sheet.id,
@@ -651,7 +681,7 @@ export default function ProductionSheetsScreen() {
                     );
                     if (active.current === userId) {
                       setSheets(next);
-                      setSheet(next.find((s) => s.id === sheet.id) ?? null);
+                      openSheet(next.find((s) => s.id === sheet.id) ?? null);
                     }
                   })
                 }
