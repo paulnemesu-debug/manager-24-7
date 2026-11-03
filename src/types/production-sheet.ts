@@ -1,0 +1,45 @@
+import type { OperationalSync } from "@/lib/operational-sync";
+import type { PriceUnit } from "./recipe";
+export type ProductionSheetLine = {
+  id: string;
+  catalogId: string | null;
+  name: string;
+  unit: PriceUnit;
+  plannedQuantity: number;
+  plannedCost: number;
+  unitCost: number;
+  actualQuantity: number | null;
+  lot: string;
+  supplier: string;
+};
+export type ProductionMeasurement = {
+  id: string;
+  stage: string;
+  recordedAt: string;
+  temperatureC: number | null;
+  durationMinutes: number | null;
+  correctiveAction: string;
+};
+export type ProductionSheet = OperationalSync & {
+  id: string;
+  importSourceId?: string;
+  correctionOf: string | null;
+  batchDate: string;
+  recipeId: string;
+  recipeTitle: string;
+  recipeVersion: string;
+  recipeSnapshot: string;
+  plannedPortions: number;
+  lines: ProductionSheetLine[];
+  actualWeightGrams: number | null;
+  actualPortions: number | null;
+  responsible: string;
+  equipmentIds: string[];
+  measurements: ProductionMeasurement[];
+  notes: string;
+  status: "draft" | "validated";
+  validatedAt: string | null;
+  voucherId: string;
+  createdAt: string;
+  updatedAt: string;
+};
