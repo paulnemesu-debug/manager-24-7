@@ -15,7 +15,7 @@ export const operationalCloudEnabled = (userId: string) => userId !== 'demo' && 
 /** Durable account queue; server revisions detect concurrent edits independently of device clocks. */
 export function createOperationalStore<T extends RecordBase>(options: {
   key: (userId: string) => string;
-  table: 'operational_documents' | 'hr_lifecycle';
+  table: 'operational_documents' | 'hr_lifecycle' | 'asset_profiles' | 'maintenance_entries' | 'production_sheets';
   id: (item: T) => string;
   normalize: (value: unknown) => T | null;
 }) {
@@ -45,12 +45,24 @@ export function createOperationalStore<T extends RecordBase>(options: {
     if (!operationalCloudEnabled(userId) || !supabase) return local;
     let items = [...local];
     try {
+      // The local queue owner and the active Supabase identity must agree. A
+      // captured bearer also closes the race between this check and fetch:
+      // Supabase must never substitute a newly signed-in account's token.
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      const session = sessionData.session;
+      if (sessionError || session?.user.id !== userId || !session.access_token) return items;
+      const authorization = `Bearer ${session.access_token}`;
+      const ownerStillCurrent = async () => {
+        const { data, error } = await supabase!.auth.getSession();
+        return !error && data.session?.user.id === userId && Boolean(data.session.access_token);
+      };
       for (let index = 0; index < items.length; index++) {
         const item = items[index];
         if (item.syncState === 'synced' || item.syncState === 'conflict') continue;
+        if (!await ownerStillCurrent()) return items;
         const { data, error } = await supabase.rpc('sync_operational_record', {
           p_kind: options.table, p_id: options.id(item), p_data: payload(item), p_expected_version: item.serverVersion ?? 0,
-        });
+        }).setHeader('Authorization', authorization);
         if (error || !data?.record) continue;
         const remote = data.record as RemoteRecord;
         items[index] = data.applied ? fromRemote(remote) : { ...item, syncState: 'conflict', remoteConflict: remote };
@@ -58,8 +70,10 @@ export function createOperationalStore<T extends RecordBase>(options: {
       }
       const remote: T[] = [];
       for (let offset = 0; ; offset += 500) {
+        if (!await ownerStillCurrent()) return items;
         const result = await supabase.from(options.table).select('id,data,version,updated_at')
-          .eq('user_id', userId).order('id').range(offset, offset + 499);
+          .eq('user_id', userId).order('id').range(offset, offset + 499)
+          .setHeader('Authorization', authorization);
         if (result.error) return items;
         remote.push(...(result.data as RemoteRecord[]).map(fromRemote));
         if (result.data.length < 500) break;

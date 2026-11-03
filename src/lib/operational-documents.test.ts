@@ -4,8 +4,21 @@ vi.mock('@react-native-async-storage/async-storage', () => ({ default: {
   getItem: async (key: string) => state.storage.get(key) ?? null,
   setItem: async (key: string, value: string) => { state.storage.set(key, value); },
 } }));
-vi.mock('@/lib/supabase', () => ({ isDemoMode: false, isSupabaseConfigured: true, supabase: {
-  rpc: async (_: string, args: { p_kind: string; p_id: string; p_data: Record<string, unknown>; p_expected_version: number }) => {
+vi.mock('@/lib/supabase', () => {
+  const request = (execute: () => Promise<unknown>) => {
+    let authorization = '';
+    const builder = {
+      setHeader: (key: string, value: string) => { if (key === 'Authorization') authorization = value; return builder; },
+      then: (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) => {
+        if (authorization !== `Bearer test-token-${state.user}`) return Promise.reject(new Error('Invalid mock authorization')).then(resolve, reject);
+        return execute().then(resolve, reject);
+      },
+    };
+    return builder;
+  };
+  return ({ isDemoMode: false, isSupabaseConfigured: true, supabase: {
+  auth: { getSession: async () => ({ data: { session: { user: { id: state.user }, access_token: `test-token-${state.user}` } }, error: null }) },
+  rpc: (_: string, args: { p_kind: string; p_id: string; p_data: Record<string, unknown>; p_expected_version: number }) => request(async () => {
     state.calls++;
     if (state.offline) return { error: new Error('offline'), data: null };
     const key = `${state.user}:${args.p_kind}:${args.p_id}`;
@@ -17,13 +30,13 @@ vi.mock('@/lib/supabase', () => ({ isDemoMode: false, isSupabaseConfigured: true
     state.rows.set(key, saved);
     if (state.loseAck) { state.loseAck = false; state.offline = true; throw new Error('response lost'); }
     return { data: { applied: true, record: saved } };
-  },
-  from: (table: string) => ({ select: () => ({ eq: (_: string, userId: string) => ({ order: () => ({ range: async (start: number, end: number) => {
+  }),
+  from: (table: string) => ({ select: () => ({ eq: (_: string, userId: string) => ({ order: () => ({ range: (start: number, end: number) => request(async () => {
     state.calls++;
     if (state.offline) return { error: new Error('offline'), data: null };
     return { data: [...state.rows.entries()].filter(([key]) => key.startsWith(`${userId}:${table}:`)).map(([, row]) => row).slice(start, end + 1), error: null };
-  } }) }) }) }),
-} }));
+  }) }) }) }) }),
+} }); });
 import { documentExpiryStatus, loadOperationalDocuments, saveOperationalDocument, resolveOperationalDocument } from './operational-documents';
 import { defaultHrLifecycle, loadHrLifecycle, saveHrLifecycle, validateHrLifecycle, hrLifecycleProgress, applyHrLifecycle } from './hr-lifecycle';
 const draft = { title: 'Autorizație', owner: 'Manager', category: 'authorization' as const, issueDate: '2026-01-01', expiryDate: '2026-10-04', notes: '' };
