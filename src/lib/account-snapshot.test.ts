@@ -30,6 +30,17 @@ import { accountLocalModule, buildAccountSnapshot } from '@/lib/account-snapshot
 beforeEach(() => { state.cache.clear(); state.tables = {}; state.reads = []; state.offline = false; });
 
 describe('complete account export', () => {
+  it('includes equipment, maintenance and production only for their owner', async () => {
+    for (const prefix of ['asset-profiles', 'maintenance-entries', 'production-sheets']) {
+      state.cache.set(`manager247.${prefix}.v1.one`, '[{"id":"mine"}]');
+      state.cache.set(`manager247.${prefix}.v1.two`, '[{"id":"theirs"}]');
+    }
+    const snapshot = await buildAccountSnapshot('one', [], []);
+    expect(snapshot.localModules.assetProfiles).toEqual([{ id: 'mine' }]);
+    expect(snapshot.localModules.maintenanceEntries).toEqual([{ id: 'mine' }]);
+    expect(snapshot.localModules.productionSheets).toEqual([{ id: 'mine' }]);
+    expect(state.reads.map(r => r.table)).toEqual(expect.arrayContaining(['asset_profiles', 'maintenance_entries', 'production_sheets']));
+  });
   it('includes HR, draft and period caches only for the requested account and excludes auth', async () => {
     state.cache.set('manager247.hr.v1.one', '{"employees":[{"id":"employee"}]}');
     state.cache.set('manager247.hr.v1.two', '{"secret":"other account"}');

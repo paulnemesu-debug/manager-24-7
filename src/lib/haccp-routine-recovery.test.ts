@@ -66,7 +66,14 @@ vi.mock('@/lib/supabase', () => ({
   supabase: { from: query },
 }));
 
-import { deactivateHaccpEquipment, defaultHaccpProfile, listHaccpEquipment, loadHaccpProfile, saveHaccpEquipment, saveHaccpProfile } from '@/lib/haccp-routine-repository';
+import { deactivateHaccpEquipment, defaultHaccpProfile, listHaccpEquipment, listHaccpEquipmentRegistry, loadHaccpProfile, saveHaccpEquipment, saveHaccpProfile } from '@/lib/haccp-routine-repository';
+
+it('retains inactive equipment in the maintenance registry without adding a temperature task', async () => {
+  const item = await saveHaccpEquipment(userId, draft);
+  await deactivateHaccpEquipment(userId, item);
+  expect(await listHaccpEquipment(userId)).toEqual([]);
+  expect(await listHaccpEquipmentRegistry(userId)).toMatchObject([{ id: draft.id, active: false }]);
+});
 
 const userId = 'routine-recovery';
 const equipmentKey = `manager247.haccp-equipment.v1.${userId}`;

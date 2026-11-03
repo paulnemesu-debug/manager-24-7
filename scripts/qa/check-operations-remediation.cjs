@@ -24,7 +24,7 @@ const mocks = {
   '@/components/tool-header':{ToolHeader:node('ToolHeader')},
   '@/components/haccp-date-input':{HaccpDateInput:node('HaccpDateInput')},
   '@/components/haccp-label-card':{HaccpLabelCard:node('HaccpLabelCard')},
-  '@/components/folder-section':{FolderHub:node('FolderHub'),FolderSection:node('FolderSection')},
+  '@/components/folder-section':{FolderHub:node('FolderHub'),FolderSection:node('FolderSection'),FolderLink:node('FolderLink')},
   '@/components/menu-engineering-matrix':{MenuEngineeringMatrix:node('MenuEngineeringMatrix')},
   '@/contexts/auth-context':{useAuth:()=>({user:{id:userId}})},
   '@/contexts/locale-context':{useI18n:()=>({t,locale:'en'})},

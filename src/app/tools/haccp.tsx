@@ -312,6 +312,7 @@ export function HaccpWorkspace({ embedded = false }: { embedded?: boolean }) {
       )}
 
       <AppButton label={locale === 'ro' ? 'Locație și echipamente' : 'Location and equipment'} variant="secondary" onPress={() => router.push('/tools/haccp-settings')} />
+      <AppButton label={locale === 'ro' ? 'Utilaje și mentenanță' : 'Equipment and maintenance'} icon="construct-outline" variant="secondary" onPress={() => router.push('/tools/equipment-maintenance' as never)} />
     </FolderSection>
     <FolderSection id="calendar" icon="calendar-outline" photo="planning" title={locale === 'ro' ? 'Calendar autocontrol' : 'Self-check calendar'} summary={locale === 'ro' ? 'Probe, analize și termene' : 'Samples, tests and deadlines'}>
       <HaccpAutocontrolCalendar userId={userId} />

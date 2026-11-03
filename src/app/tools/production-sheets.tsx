@@ -32,6 +32,7 @@ import {
   previewProductionSheetsImport,
   productionSheetsGrid,
   productionSheetsHtml,
+  productionSheetsTemplate,
 } from "@/lib/production-sheets-transfer";
 import {
   exportOperationsGrid,
@@ -311,10 +312,24 @@ export default function ProductionSheetsScreen() {
         />
         <Body>
           {tr(
-            "Șablon: exportă o fișă, păstrează antetul production-sheets-v1. Cantitățile sunt în kg/l/buc. Date YYYY-MM-DD; rânduri sheet, ingredient, measurement, equipment și snapshot. Importurile devin ciorne fără semnătură; identitățile deja prezente sunt omise.",
-            "Template: export a sheet and keep the production-sheets-v1 header. Quantities use kg/l/units. Dates YYYY-MM-DD; use sheet, ingredient, measurement, equipment and snapshot rows. Imports become unsigned drafts; existing identities are skipped.",
+            "Descarcă șablonul sau exportă o fișă și păstrează antetul production-sheets-v1. Cantitățile sunt în kg/l/buc. Date YYYY-MM-DD; rânduri sheet, ingredient, measurement, equipment și snapshot. Importurile devin ciorne fără semnătură; identitățile deja prezente sunt omise.",
+            "Download the template or export a sheet and keep the production-sheets-v1 header. Quantities use kg/l/units. Dates YYYY-MM-DD; use sheet, ingredient, measurement, equipment and snapshot rows. Imports become unsigned drafts; existing identities are skipped.",
           )}
         </Body>
+        <AppButton
+          label={tr("Descarcă șablon Excel", "Download Excel template")}
+          disabled={busy || !ready}
+          variant="secondary"
+          onPress={() =>
+            void run(() =>
+              exportOperationsGrid(
+                "model-fisa-productie",
+                productionSheetsTemplate(localIsoDate(), locale),
+                "xlsx",
+              ),
+            )
+          }
+        />
         {transfers(sheets)}
         <AppButton
           label={tr("Importă Excel / CSV", "Import Excel / CSV")}

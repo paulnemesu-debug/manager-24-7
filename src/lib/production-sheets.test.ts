@@ -30,7 +30,16 @@ import {
 import {
   productionSheetsGrid,
   previewProductionSheetsImport,
+  productionSheetsTemplate,
 } from "./production-sheets-transfer";
+
+it('provides an editable import template before the first sheet exists', () => {
+  const preview = previewProductionSheetsImport(productionSheetsTemplate('2026-11-03', 'ro'), []);
+  expect(preview.errors).toEqual([]);
+  expect(preview.records).toHaveLength(1);
+  expect(preview.records[0]).toMatchObject({ status: 'draft', actualPortions: null, actualWeightGrams: null });
+  expect(preview.records[0].lines[0]).toMatchObject({ actualQuantity: null });
+});
 import type { Recipe } from "@/types/recipe";
 const recipe = {
   id: "r",

@@ -10,7 +10,7 @@ import { type Href, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { FolderHub, FolderSection } from '@/components/folder-section';
+import { FolderHub, FolderLink, FolderSection } from '@/components/folder-section';
 import { HaccpLabelCard } from '@/components/haccp-label-card';
 import { ToolHeader } from '@/components/tool-header';
 import { AppButton, Body, Card, Field, IconButton, SectionHeader } from '@/components/ui';
@@ -144,6 +144,19 @@ export function ProductionWorkspace({ embedded = false }: { embedded?: boolean }
 
   return (
     <FolderHub header={<ToolHeader title={t('production.title')} subtitle={t('production.subtitle')} showBack={!embedded} />}>
+      <FolderSection id="production-sheets" icon="document-text-outline" photo="operations" accent="gold"
+        title={locale === 'ro' ? 'Fișe de producție' : 'Production sheets'}
+        summary={locale === 'ro' ? 'Plan, consum real, loturi și randament · import / export' : 'Plan, actual consumption, lots and yield · import / export'}>
+        <FolderLink title={locale === 'ro' ? 'Deschide fișele de producție' : 'Open production sheets'} icon="document-text-outline" onPress={() => router.push('/tools/production-sheets' as Href)} />
+        {selected.map(recipe => <FolderLink key={recipe.id} title={recipe.title}
+          summary={locale === 'ro' ? `Creează fișă pentru ${portions[recipe.id]} porții` : `Create sheet for ${portions[recipe.id]} portions`}
+          icon="add-circle-outline" onPress={() => router.push({ pathname: '/tools/production-sheets', params: { recipeId: recipe.id, portions: String(portions[recipe.id]) } } as Href)} />)}
+      </FolderSection>
+      <FolderSection id="equipment-maintenance" icon="construct-outline" photo="operations"
+        title={locale === 'ro' ? 'Utilaje și mentenanță' : 'Equipment and maintenance'}
+        summary={locale === 'ro' ? 'Igienizare, întreținere, revizii și costuri' : 'Cleaning, upkeep, servicing and costs'}>
+        <FolderLink title={locale === 'ro' ? 'Deschide registrul de utilaje' : 'Open equipment register'} icon="construct-outline" onPress={() => router.push('/tools/equipment-maintenance' as Href)} />
+      </FolderSection>
       <FolderSection id="plan" icon="calendar-outline" photo="planning" accent="gold"
         title={locale === 'ro' ? 'Planificare' : 'Production plan'}
         summary={locale === 'ro' ? `${selected.length} preparate · ${format.number(requests.reduce((sum, item) => sum + item.portions, 0))} porții` : `${selected.length} dishes · ${format.number(requests.reduce((sum, item) => sum + item.portions, 0))} portions`}>

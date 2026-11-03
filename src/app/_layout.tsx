@@ -67,6 +67,8 @@ function AppNavigator() {
         <Stack.Screen name="ingredient/[id]" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="tools/invoice-import" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="tools/production" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="tools/production-sheets" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="tools/equipment-maintenance" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="tools/consumption-vouchers" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="tools/bulk" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="tools/menu-engineering" options={{ animation: 'slide_from_right' }} />

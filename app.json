@@ -3,7 +3,7 @@
     "name": "Manager 24/7",
     "slug": "paradim",
     "owner": "paradimoperationss-team",
-    "version": "1.6.6",
+    "version": "1.6.7",
     "description": "MANAGER 24/7™ by PARADIM — software proprietar PARADIM Operations SRL, conceput și coordonat de Marius Paul Nemeșu.",
     "backgroundColor": "#F7F5EF",
     "orientation": "portrait",
@@ -12,7 +12,7 @@
     "userInterfaceStyle": "light",
     "android": {
       "package": "ro.paradim.professionalfoodcost",
-      "versionCode": 67,
+      "versionCode": 68,
       "allowBackup": false,
       "blockedPermissions": [
         "android.permission.SYSTEM_ALERT_WINDOW",
@@ -26,7 +26,7 @@
     },
     "ios": {
       "bundleIdentifier": "ro.paradim.manager247",
-      "buildNumber": "34",
+      "buildNumber": "68",
       "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,

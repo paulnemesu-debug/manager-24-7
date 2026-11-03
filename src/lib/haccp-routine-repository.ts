@@ -189,6 +189,14 @@ export function listHaccpEquipment(userId: string): Promise<HaccpEquipment[]> {
   return withStorageLock(equipmentKey(userId), () => listHaccpEquipmentUnlocked(userId));
 }
 
+/** Maintenance retains deactivated assets and their identity without scheduling readings. */
+export function listHaccpEquipmentRegistry(userId: string): Promise<HaccpEquipment[]> {
+  return withStorageLock(equipmentKey(userId), async () => {
+    await listHaccpEquipmentUnlocked(userId);
+    return (await readEquipmentCache(userId) ?? []).sort((a, b) => a.sortOrder - b.sortOrder);
+  });
+}
+
 async function saveHaccpEquipmentUnlocked(userId: string, draft: HaccpEquipmentDraft) {
   const now = new Date().toISOString();
   const item: HaccpEquipment = {

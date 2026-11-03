@@ -46,6 +46,33 @@ function row(id: string, type: string, values: Record<string, Cell>): Cell[] {
           : (values[h] ?? null),
   );
 }
+export function productionSheetsTemplate(
+  date: string,
+  locale: "ro" | "en",
+): Cell[][] {
+  const ro = locale === "ro";
+  const id = "example-production-1";
+  return [
+    HEADERS,
+    row(id, "sheet", {
+      batch_date: date,
+      recipe_title: ro ? "Exemplu de preparat" : "Example dish",
+      recipe_version: "external",
+      planned_portions: 10,
+      status: "draft",
+      notes: ro
+        ? "Exemplu: înlocuiește datele și folosește un source_sheet_id unic pentru fiecare fișă nouă. Completează consumurile și măsurătorile numai după efectuare."
+        : "Example: replace these values and use a unique source_sheet_id for each new sheet. Enter actual consumption and measurements only after performing them.",
+    }),
+    row(id, "ingredient", {
+      name: ro ? "Ingredient exemplu" : "Example ingredient",
+      unit: "kg",
+      planned_quantity: 1,
+      planned_cost: 0,
+      unit_cost: 0,
+    }),
+  ];
+}
 export function productionSheetsGrid(
   sheets: readonly ProductionSheet[],
 ): Cell[][] {

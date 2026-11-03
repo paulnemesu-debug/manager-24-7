@@ -38,13 +38,13 @@ describe('Android release invariants', () => {
     const pkg = JSON.parse(read('package.json'));
     const gradle = read('android/app/build.gradle');
     const eas = JSON.parse(read('eas.json'));
-    expect(app.expo.version).toBe('1.6.6');
+    expect(app.expo.version).toBe('1.6.7');
     expect(pkg.version).toBe(app.expo.version);
     expect(app.expo.android.package).toBe('ro.paradim.professionalfoodcost');
-    expect(app.expo.android.versionCode).toBe(67);
+    expect(app.expo.android.versionCode).toBe(68);
     expect(gradle).toContain("applicationId 'ro.paradim.professionalfoodcost'");
-    expect(gradle).toContain('versionName "1.6.6"');
-    expect(gradle).toContain('versionCode 67');
+    expect(gradle).toContain('versionName "1.6.7"');
+    expect(gradle).toContain('versionCode 68');
     expect(eas.cli.appVersionSource).toBe('local');
     expect(eas.build.production.autoIncrement).toBe(false);
     expect(eas.build['production-apk'].autoIncrement).toBe(false);
