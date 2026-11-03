@@ -58,7 +58,15 @@ export async function loadEquipmentRegistry(userId: string): Promise<EquipmentAs
 }
 export const loadMaintenance = entries.load;
 export const resolveEquipment = assets.resolve;
-export const resolveMaintenance = entries.resolve;
+export function resolveMaintenance(userId:string,id:string,choice:'local'|'remote') {
+    return withStorageLock(`maintenance-actions.${userId}`,async()=>{
+        const item=(await entries.cached(userId)).find(entry=>entry.id===id);
+        if(choice==='local' && item?.remoteConflict?.data.completedDate) {
+            throw Error('Lucrarea este finalizată în cloud. Folosiți versiunea cloud; înregistrați o lucrare nouă pentru corecții. / This task is completed in the cloud. Use the cloud version; record a new task for corrections.');
+        }
+        return entries.resolve(userId,id,choice);
+    });
+}
 export async function saveEquipment(userId: string, a: EquipmentAsset) {
     if (!normalizeAsset(a))
         throw Error('Invalid equipment / Utilaj invalid');

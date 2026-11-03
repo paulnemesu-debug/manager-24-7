@@ -19,7 +19,7 @@ vi.mock('@/lib/supabase', () => ({
 vi.mock('@/lib/haccp-routine-repository', () => ({
     listHaccpEquipmentRegistry: async () => []
 }));
-import { emptyAsset, emptyMaintenance, loadEquipmentRegistry, loadMaintenance, saveEquipment, saveMaintenance, finishMaintenance } from './equipment-maintenance';
+import { emptyAsset, emptyMaintenance, loadEquipmentRegistry, loadMaintenance, saveEquipment, saveMaintenance, finishMaintenance, resolveMaintenance } from './equipment-maintenance';
 beforeEach(() => {
     state.storage.clear();
     state.failSuccessor = false;
@@ -72,4 +72,23 @@ it('repairs a failed successor write on retry without duplicating completion', a
     await finishMaintenance('one', m, '2026-11-03', 1, 2);
     await finishMaintenance('one', m, '2026-11-03', 1, 2);
     expect(await loadMaintenance('one')).toHaveLength(2);
+});
+it('keeps completed remote maintenance conflict intact when local overwrite is requested', async () => {
+    const draft = {
+        ...emptyMaintenance('asset'), id: 'conflict', title: 'Repair', responsible: 'Ana', dueDate: '2026-11-01', syncState: 'conflict' as const,
+        remoteConflict: {
+            data: {
+                ...emptyMaintenance('asset'), id: 'conflict', title: 'Repair', responsible: 'Ana', dueDate: '2026-11-01', completedDate: '2026-11-03', actualParts: 1, actualLabor: 2, actualTravel: 0, actualConsumables: 0
+            }, version: 2, updated_at: '2026-11-03T00:00:00Z'
+        }
+    };
+    const key = 'manager247.maintenance-entries.v1.one';
+    state.storage.set(key, JSON.stringify([draft]));
+    const original = state.storage.get(key);
+    await expect(resolveMaintenance('one', 'conflict', 'local')).rejects.toThrow(/cloud|cloud/i);
+    expect(state.storage.get(key)).toBe(original);
+    const resolved = await resolveMaintenance('one', 'conflict', 'remote');
+    expect(resolved[0]).toMatchObject({
+        completedDate: '2026-11-03', syncState: 'synced'
+    });
 });

@@ -25,6 +25,8 @@ export type OperationalLine = {
 export type ConsumptionVoucherSource = 'manual' | 'file_import' | 'production_plan' | 'bulk_recipe';
 
 export type ConsumptionVoucher = {
+  /** Pending production-sheet intent must replay through the create-once RPC, never upsert. */
+  createOnly?: boolean;
   id: string;
   documentDate: string;
   reference: string;
@@ -41,7 +43,7 @@ export type ConsumptionVoucher = {
 
 export type ConsumptionVoucherDraft = Omit<
   ConsumptionVoucher,
-  'createdAt' | 'updatedAt' | 'syncState' | 'deletedAt' | 'totalCost'
+  'createdAt' | 'updatedAt' | 'syncState' | 'deletedAt' | 'totalCost' | 'createOnly'
 >;
 
 export type BulkBatchSource = 'manual' | 'file_import' | 'consumption_voucher';

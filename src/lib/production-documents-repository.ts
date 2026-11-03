@@ -156,6 +156,9 @@ async function saveConsumptionVoucherUnlocked(
   const now = new Date().toISOString();
   const cached = await loadCachedConsumptionVouchers(userId);
   const existing = cached.find((item) => item.id === draft.id);
+  if (existing?.createOnly && existing.syncState === 'pending') {
+    throw new Error('Așteptați sincronizarea bonului de producție înainte de editare. / Wait for the production voucher to synchronize before editing.');
+  }
   const lines = draft.lines.map(recalculateOperationalLine);
   const pending: ConsumptionVoucher = {
     ...draft,
@@ -166,6 +169,7 @@ async function saveConsumptionVoucherUnlocked(
     syncState: canUseCloud(userId) ? 'pending' : 'local',
     deletedAt: null,
   };
+  if (existing?.deletedAt) throw new ProductionVoucherDeletedError();
   await replaceCache(voucherKey(userId), pending);
   if (!canUseCloud(userId) || !supabase) return pending;
   const { error } = await supabase.from('consumption_vouchers').upsert({
@@ -186,6 +190,60 @@ async function saveConsumptionVoucherUnlocked(
   await replaceCache(voucherKey(userId), synced);
   return synced;
 }
+
+/** A deleted production voucher is a durable outcome, never an invitation to recreate it. */
+export class ProductionVoucherDeletedError extends Error {
+  constructor() { super('Bonul de consum a fost șters. Nu poate fi recreat automat. / The consumption voucher was deleted and cannot be recreated automatically.'); }
+}
+
+async function voucherAuthorization(userId: string): Promise<string | null> {
+  if (!canUseCloud(userId) || !supabase) return null;
+  const { data, error } = await supabase.auth.getSession();
+  const session = data.session;
+  return !error && session?.user.id === userId && session.access_token ? `Bearer ${session.access_token}` : null;
+}
+
+async function replayCreateOnlyVoucher(userId: string, pending: ConsumptionVoucher): Promise<ConsumptionVoucher> {
+  if (pending.deletedAt) throw new ProductionVoucherDeletedError();
+  if (!canUseCloud(userId) || !supabase) return pending;
+  try {
+    const authorization = await voucherAuthorization(userId);
+    if (!authorization) return pending;
+    const { data, error } = await supabase.rpc('create_production_sheet_voucher', {
+      p_sheet_id: pending.sourceReference,
+    }).setHeader('Authorization', authorization);
+    if (error || !data || data.id !== pending.id || !['created','existing','deleted'].includes(data.status)) return pending;
+    if (data.status === 'deleted') {
+      const tombstone: ConsumptionVoucher = { ...pending, createOnly: true, deletedAt: new Date().toISOString(), syncState: 'synced' };
+      await replaceCache(voucherKey(userId), tombstone);
+      throw new ProductionVoucherDeletedError();
+    }
+    if (!data.record || data.record.id !== pending.id) return pending;
+    const authoritative: ConsumptionVoucher = { ...voucherFromRemote(data.record as RemoteVoucher), createOnly: true };
+    await replaceCache(voucherKey(userId), authoritative);
+    return authoritative;
+  } catch (error) {
+    if (error instanceof ProductionVoucherDeletedError) throw error;
+    return pending;
+  }
+}
+
+/** Explicit production-sheet request; offline intent remains insert-only across restarts. */
+export const createConsumptionVoucherOnce = (userId: string, draft: ConsumptionVoucherDraft) =>
+  withStorageLock(voucherKey(userId), async (): Promise<ConsumptionVoucher> => {
+    if (draft.source !== 'production_plan' || !draft.sourceReference) throw new Error('Production sheet reference required / Referința fișei de producție este obligatorie');
+    const cached = await loadCachedConsumptionVouchers(userId);
+    const existing = cached.find(item => item.id === draft.id);
+    if (existing?.deletedAt) throw new ProductionVoucherDeletedError();
+    const now = new Date().toISOString();
+    const lines = draft.lines.map(recalculateOperationalLine);
+    const pending: ConsumptionVoucher = existing ?? {
+      ...draft, lines, totalCost: Math.round(lines.reduce((sum,line)=>sum+line.cost,0)*100)/100,
+      createdAt: now, updatedAt: now, syncState: canUseCloud(userId)?'pending':'local', deletedAt:null, createOnly:true,
+    };
+    await replaceCache(voucherKey(userId),pending);
+    return replayCreateOnlyVoucher(userId,pending);
+  });
 
 async function saveBulkBatchUnlocked(userId: string, draft: BulkBatchDraft): Promise<BulkBatch> {
   const now = new Date().toISOString();
@@ -233,32 +291,35 @@ async function saveBulkBatchUnlocked(userId: string, draft: BulkBatchDraft): Pro
 
 async function syncConsumptionVouchersUnlocked(userId: string): Promise<ConsumptionVoucher[]> {
   let local = await loadCachedConsumptionVouchers(userId);
-  if (!canUseCloud(userId) || !supabase) return local;
-  for (const item of local.filter((entry) => entry.syncState === 'pending')) {
-    const synced = await saveConsumptionVoucherUnlocked(userId, {
-      id: item.id,
-      documentDate: item.documentDate,
-      reference: item.reference,
-      source: item.source,
-      sourceReference: item.sourceReference,
-      notes: item.notes,
-      lines: item.lines,
-    });
-    local = local.map((entry) => entry.id === synced.id ? synced : entry);
+  const visible = () => local.filter(item=>!item.deletedAt);
+  if (!canUseCloud(userId) || !supabase) return visible();
+  for (const item of local.filter(entry=>entry.syncState==='pending' && !entry.deletedAt)) {
+    if (item.createOnly) {
+      try { await replayCreateOnlyVoucher(userId,item); }
+      catch(error) { if(!(error instanceof ProductionVoucherDeletedError)) throw error; }
+      local=await loadCachedConsumptionVouchers(userId);
+    } else {
+      const synced = await saveConsumptionVoucherUnlocked(userId, {
+        id:item.id, documentDate:item.documentDate, reference:item.reference, source:item.source,
+        sourceReference:item.sourceReference, notes:item.notes, lines:item.lines,
+      });
+      local=local.map(entry=>entry.id===synced.id?synced:entry);
+    }
   }
-  const { data, error } = await supabase
-    .from('consumption_vouchers')
+  const authorization=await voucherAuthorization(userId);
+  if(!authorization)return visible();
+  const {data,error}=await supabase.from('consumption_vouchers')
     .select('id,document_date,reference,source,source_reference,notes,lines,total_cost,created_at,updated_at')
-    .eq('user_id', userId)
-    .order('document_date', { ascending: false })
-    .order('updated_at', { ascending: false })
-    .limit(100);
-  if (error) return local;
-  const remote = (data as RemoteVoucher[]).map(voucherFromRemote);
-  const pending = local.filter((item) => item.syncState === 'pending');
-  const merged = [...pending, ...remote.filter((item) => !pending.some((entry) => entry.id === item.id))];
-  await AsyncStorage.setItem(voucherKey(userId), JSON.stringify(merged));
-  return merged;
+    .eq('user_id',userId).order('document_date',{ascending:false}).order('updated_at',{ascending:false}).limit(100)
+    .setHeader('Authorization',authorization);
+  if(error)return visible();
+  const remote=(data as RemoteVoucher[]).map(voucherFromRemote);
+  const pending=local.filter(item=>item.syncState==='pending'&&!item.deletedAt);
+  // Keep production creation/deletion receipts even outside the latest-100 list.
+  const receipts=local.filter(item=>item.createOnly && item.syncState!=='pending' && !remote.some(row=>row.id===item.id));
+  const merged=[...pending,...remote.filter(item=>!pending.some(entry=>entry.id===item.id)).map(item=>({...item,createOnly:local.some(entry=>entry.id===item.id&&entry.createOnly)||undefined})),...receipts];
+  await AsyncStorage.setItem(voucherKey(userId),JSON.stringify(merged));
+  return merged.filter(item=>!item.deletedAt);
 }
 
 async function syncBulkBatchesUnlocked(userId: string): Promise<BulkBatch[]> {
