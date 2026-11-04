@@ -13,6 +13,7 @@ export type ParsedPriceRow = {
   name: string;
   price: number;
   unit: PriceUnit | null;
+  supplier?: string;
   notes: string | null;
   rowNumber: number;
 };
@@ -39,6 +40,7 @@ const NAME_HEADERS = ['denumire', 'produs', 'articol', 'descriere', 'nume', 'nam
 const PRICE_HEADERS = ['pret', 'price', 'valoare', 'cost', 'unitar', 'net'];
 const UNIT_HEADERS = ['um', 'u.m', 'unitate', 'unit', 'masura', 'uom'];
 const NOTES_HEADERS = ['notes', 'note', 'observatii', 'observații', 'mentiuni', 'mențiuni'];
+const SUPPLIER_HEADERS = ['supplier', 'supplier name', 'furnizor', 'nume furnizor', 'vendor', 'vendor name'];
 /** Antete care conțin „price"/„pret" dar nu sunt de fapt o coloană de preț. */
 const PRICE_HEADER_EXCLUDE = ['data', 'date', 'mode', 'mod'];
 /** Coloane de tip flag folosite în cataloagele curățate manual (ex. PARADIM/Metro). */
@@ -207,10 +209,12 @@ function findHeaderRow(grid: unknown[][]): {
   notesIndex: number;
   importFlagIndex: number;
   confidenceIndex: number;
+  supplierIndex: number;
 } | null {
   for (let index = 0; index < Math.min(grid.length, 20); index += 1) {
     const headers = (grid[index] ?? []).map((cell) => String(cell ?? ''));
-    const nameIndex = findHeaderIndex(headers, NAME_HEADERS);
+    const supplierHeaders = headers.map(header => SUPPLIER_HEADERS.includes(normalizeText(header)));
+    const nameIndex = findHeaderIndex(headers.map((header, column) => supplierHeaders[column] ? '' : header), NAME_HEADERS);
     const priceIndex = findPriceHeaderIndex(headers);
     if (nameIndex >= 0 && priceIndex >= 0) {
       return {
@@ -221,6 +225,7 @@ function findHeaderRow(grid: unknown[][]): {
         notesIndex: findLastHeaderIndex(headers, NOTES_HEADERS),
         importFlagIndex: findHeaderIndex(headers, IMPORT_FLAG_HEADERS),
         confidenceIndex: findHeaderIndex(headers, CONFIDENCE_HEADERS),
+        supplierIndex: supplierHeaders.indexOf(true),
       };
     }
   }
@@ -236,6 +241,7 @@ function extractRows(
   notesIndex = -1,
   importFlagIndex = -1,
   confidenceIndex = -1,
+  supplierIndex = -1,
 ): ParsedPriceRow[] {
   const rows: ParsedPriceRow[] = [];
   for (let index = headerRow + 1; index < grid.length; index += 1) {
@@ -259,11 +265,13 @@ function extractRows(
       : cells.slice(1).map(parsePrice).find((value) => value !== null) ?? null;
     if (!name || price === null) continue;
     const notes = notesIndex >= 0 ? String(cells[notesIndex] ?? '').trim() || null : null;
+    const supplier = supplierIndex >= 0 ? String(cells[supplierIndex] ?? '').trim() : '';
     rows.push({
       name,
       price,
       unit: unitIndex >= 0 ? parseUnit(cells[unitIndex]) : null,
       notes,
+      ...(supplier ? { supplier } : {}),
       rowNumber: index + 1,
     });
   }
@@ -297,6 +305,7 @@ export async function parsePriceList(data: ArrayBuffer | string): Promise<Parsed
       found.notesIndex,
       found.importFlagIndex,
       found.confidenceIndex,
+      found.supplierIndex,
     );
     if (rows.length) return rows;
   }

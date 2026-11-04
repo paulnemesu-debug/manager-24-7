@@ -79,7 +79,17 @@ export function createOperationalStore<T extends RecordBase>(options: {
         if (result.data.length < 500) break;
       }
       const merged = new Map(remote.map((item) => [options.id(item), item]));
-      for (const item of items) if (item.syncState !== 'synced') merged.set(options.id(item), item);
+      for (const item of items) {
+        const cloud = merged.get(options.id(item));
+        // These modules archive/deactivate records; the client has no hard-delete
+        // protocol. An omitted row is not a deletion record. Keep owned durable
+        // data when a list is empty/filtered, and never undo an acknowledged
+        // revision with an older read. Newer cloud revisions still win.
+        if (item.syncState !== 'synced' || !cloud
+          || (item.serverVersion ?? 0) > (cloud.serverVersion ?? 0)) {
+          merged.set(options.id(item), item);
+        }
+      }
       items = [...merged.values()];
       return write(userId, items);
     } catch {

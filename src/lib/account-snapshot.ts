@@ -31,6 +31,7 @@ const LOCAL_MODULES = {
   invoiceMappings: 'manager247.invoice_product_mappings.v1.',
   priceAlerts: 'manager247.price_alert_history.v1.',
   recipeDrafts: 'manager247.recipe-drafts.v1.',
+  trialRegistration: 'manager247.trial-registration.v1.',
   productionPlan: 'manager247.production-plan.v1.',
   assetProfiles: 'manager247.asset-profiles.v1.',
   maintenanceEntries: 'manager247.maintenance-entries.v1.',

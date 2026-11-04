@@ -115,6 +115,21 @@ async function mount() {
   await select("Task A");
 }
 describe("maintenance numeric editing", () => {
+  it("renders the task form without raw text inside native layout containers", async () => {
+    await mount();
+    const inspect = (node: ReturnType<ReactTestRenderer['toJSON']>, parent = ''): void => {
+      if (Array.isArray(node)) {
+        node.forEach(child => inspect(child, parent));
+      } else if (node) {
+        for (const child of node.children ?? []) {
+          if (typeof child === 'string') {
+            expect(['Text', 'Body'], `Raw text ${JSON.stringify(child)} under ${node.type}`).toContain(node.type);
+          } else inspect(child, node.type);
+        }
+      }
+    };
+    inspect(tree!.toJSON());
+  });
   it("preserves clearing and decimal prefixes and parses comma decimals only when saved", async () => {
     await mount();
     for (const value of ["", "1", "12", "12,", "12,5"]) {

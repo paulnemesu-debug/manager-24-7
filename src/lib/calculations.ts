@@ -67,6 +67,7 @@ export function calculateUnitPrice(
   packagePrice: number | null | undefined,
   packageQuantity: number | null | undefined,
 ): number | null {
+  if (packagePrice == null || packageQuantity == null) return null;
   const price = Number(packagePrice);
   const quantity = Number(packageQuantity);
   if (!Number.isFinite(price) || !Number.isFinite(quantity) || price < 0 || quantity <= 0) return null;

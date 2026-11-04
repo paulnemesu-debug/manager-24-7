@@ -90,6 +90,18 @@ describe('spreadsheet reading', () => {
     const rows = await parsePriceList('Denumire;UM;Pret unitar;Note\n"Unt; 82%";kg;45,50;"promo\nweekend"\n');
     expect(rows[0]).toMatchObject({ name: 'Unt; 82%', price: 45.5, unit: 'kg', notes: 'promo\nweekend' });
   });
+
+  it('keeps an explicitly supplied vendor and leaves a generic price row without one', async () => {
+    const [explicit] = await parsePriceList('Name,Price,Supplier\nMilk,8.75,QA Vendor\n');
+    const [generic] = await parsePriceList('Name,Price\nMilk,8.75\n');
+    expect(explicit).toMatchObject({ supplier: 'QA Vendor' });
+    expect(generic).not.toHaveProperty('supplier');
+  });
+
+  it('does not mistake a supplier column before the product name for the ingredient', async () => {
+    const [row] = await parsePriceList('Supplier Name,Name,Price\nQA Vendor,QA Milk,8.75\n');
+    expect(row).toMatchObject({ name: 'QA Milk', price: 8.75, supplier: 'QA Vendor' });
+  });
 });
 
 describe('matching against the catalog', () => {

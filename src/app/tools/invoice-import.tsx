@@ -209,7 +209,7 @@ export default function InvoiceImportScreen() {
       const updates = selectedMatches.map(({ match, value }) => ({
         id: match.catalog.id,
         purchasePrice: value,
-        supplier,
+        supplier: invoice.supplier ?? undefined,
         source,
         sourceDate,
       }));

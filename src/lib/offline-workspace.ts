@@ -25,10 +25,18 @@ export type WorkspaceCache = {
 };
 
 type OperationMeta = { id: string; createdAt: string; attempts?: number };
+type RecipeSaveIntent = {
+  type: 'saveRecipe';
+  localId: string;
+  draft: RecipeDraft;
+  createDispatched?: boolean;
+  createDraft?: RecipeDraft;
+};
+type RecipeDeleteIntent = { type: 'deleteRecipe'; recipeId: string; createRequestId?: string };
 
 export type PendingOperation =
-  | (OperationMeta & { type: 'saveRecipe'; localId: string; draft: RecipeDraft })
-  | (OperationMeta & { type: 'deleteRecipe'; recipeId: string })
+  | (OperationMeta & RecipeSaveIntent)
+  | (OperationMeta & RecipeDeleteIntent)
   | (OperationMeta & { type: 'saveCatalog'; localId: string; draft: CatalogIngredientDraft })
   | (OperationMeta & { type: 'deleteCatalog'; catalogId: string })
   | (OperationMeta & { type: 'updatePrices'; updates: CatalogPriceUpdate[] });
@@ -36,8 +44,8 @@ export type PendingOperation =
 export const MAX_ATTEMPTS = 3;
 
 export type PendingOperationInput =
-  | { type: 'saveRecipe'; localId: string; draft: RecipeDraft }
-  | { type: 'deleteRecipe'; recipeId: string }
+  | RecipeSaveIntent
+  | RecipeDeleteIntent
   | { type: 'saveCatalog'; localId: string; draft: CatalogIngredientDraft }
   | { type: 'deleteCatalog'; catalogId: string }
   | { type: 'updatePrices'; updates: CatalogPriceUpdate[] };
@@ -186,25 +194,47 @@ async function enqueueOperationUnlocked(
   const now = new Date().toISOString();
   let next = [...current];
   let operation = input;
+  let replacementIndex = -1;
 
   if (input.type === 'saveRecipe') {
     const localId = input.localId;
-    const previous = next.find((item) => item.type === 'saveRecipe' && item.localId === localId);
-    if (previous?.type === 'saveRecipe' && previous.draft.expectedUpdatedAt) {
-      operation = { ...input, draft: { ...input.draft, expectedUpdatedAt: previous.draft.expectedUpdatedAt } };
+    replacementIndex = next.findIndex((item) => item.type === 'saveRecipe' && item.localId === localId);
+    const previous = next[replacementIndex];
+    if (previous?.type === 'saveRecipe') {
+      operation = {
+        ...input,
+        ...(previous.createDispatched ? {
+          createDispatched: true,
+          createDraft: previous.createDraft ?? previous.draft,
+        } : {}),
+        draft: {
+          ...input.draft,
+          expectedUpdatedAt: previous.draft.expectedUpdatedAt ?? input.draft.expectedUpdatedAt,
+        },
+      };
     }
     next = next.filter((item) => !(
       item.type === 'saveRecipe' && item.localId === localId
     ));
   } else if (input.type === 'deleteRecipe') {
     const recipeId = input.recipeId;
-    const localOnly = isOfflineId(recipeId)
-      && next.some((item) => item.type === 'saveRecipe' && item.localId === recipeId);
+    const createIndex = isOfflineId(recipeId)
+      ? next.findIndex((item) => item.type === 'saveRecipe' && item.localId === recipeId)
+      : -1;
+    const deleteIndex = next.findIndex((item) => item.type === 'deleteRecipe' && item.recipeId === recipeId);
+    const pendingCreate = next[createIndex];
+    const pendingDelete = next[deleteIndex];
     next = next.filter((item) => !(
       (item.type === 'saveRecipe' && item.localId === recipeId)
       || (item.type === 'deleteRecipe' && item.recipeId === recipeId)
     ));
-    if (localOnly) {
+    if (pendingCreate?.type === 'saveRecipe' && pendingCreate.createDispatched) {
+      operation = { ...input, createRequestId: pendingCreate.localId };
+      replacementIndex = createIndex;
+    } else if (pendingDelete?.type === 'deleteRecipe' && pendingDelete.createRequestId) {
+      operation = { ...input, createRequestId: pendingDelete.createRequestId };
+      replacementIndex = deleteIndex;
+    } else if (pendingCreate) {
       await writePendingOperations(userId, next);
       return next;
     }
@@ -238,13 +268,23 @@ async function enqueueOperationUnlocked(
   }
 
   const saved = { ...operation, id: operationId(), createdAt: now } as PendingOperation;
-  next.push(saved);
+  if (replacementIndex < 0) next.push(saved);
+  else next.splice(replacementIndex, 0, saved);
   await writePendingOperations(userId, next);
   return next;
 }
 
 export function enqueueOperation(userId: string, input: PendingOperationInput) {
   return withStorageLock('offline-queue:' + userId, () => enqueueOperationUnlocked(userId, input));
+}
+
+/** Freeze legacy queued creates before their first keyed request. */
+export function freezePendingRecipeCreate(userId: string, operation: OperationMeta & RecipeSaveIntent) {
+  return withStorageLock('offline-queue:' + userId, async () => {
+    const current = await readPendingOperations(userId);
+    const next = current.map((item) => item.id === operation.id ? { ...operation, createDispatched: true } : item);
+    await writePendingOperations(userId, next);
+  });
 }
 
 /** Preserve a confirmed insert ID and version even if its photo attachment fails. */
@@ -254,7 +294,7 @@ export function rebasePendingRecipeSave(userId: string, operation: PendingOperat
     if (operation.type !== 'saveRecipe' || !retryDraft.id) return current;
     const next = remapPendingOperations(current, operation.localId, retryDraft.id).map((item) => {
       if (item.type !== 'saveRecipe' || item.localId !== retryDraft.id) return item;
-      return { ...item, draft: item.id === operation.id ? retryDraft : {
+      return { ...item, createDraft: undefined, createDispatched: undefined, draft: item.id === operation.id ? retryDraft : {
         ...item.draft, expectedUpdatedAt: retryDraft.expectedUpdatedAt,
       } };
     });
@@ -284,7 +324,9 @@ export function rejectPendingOperation(userId: string, operation: PendingOperati
     const current = await readPendingOperations(userId);
     const latest = current.find((item) => item.id === operation.id);
     if (!latest) return { pending: current, quarantined: true };
-    const conflict = latest.type === 'saveRecipe' && /RECIPE_CONFLICT/.test(workspaceErrorMessage(error));
+    const message = workspaceErrorMessage(error);
+    const conflict = ((latest.type === 'saveRecipe' || latest.type === 'deleteRecipe') && /RECIPE_CONFLICT/.test(message))
+      || (latest.type === 'saveRecipe' && /RECIPE_NOT_FOUND/.test(message));
     const attempts = (latest.attempts ?? 0) + 1;
     if (!conflict && attempts < MAX_ATTEMPTS) {
       const pending = current.map((item) => item.id === latest.id ? { ...item, attempts } : item);
@@ -304,20 +346,22 @@ export function remapPendingOperations(
   fromId: string,
   toId: string,
 ): PendingOperation[] {
+  const remapDraft = (draft: RecipeDraft): RecipeDraft => ({
+    ...draft,
+    id: draft.id === fromId ? toId : draft.id,
+    ingredients: draft.ingredients.map((ingredient) => ({
+      ...ingredient,
+      catalogId: ingredient.catalogId === fromId ? toId : ingredient.catalogId,
+      subRecipeId: ingredient.subRecipeId === fromId ? toId : ingredient.subRecipeId,
+    })),
+  });
   return operations.map((item) => {
     if (item.type === 'saveRecipe') {
       return {
         ...item,
         localId: item.localId === fromId ? toId : item.localId,
-        draft: {
-          ...item.draft,
-          id: item.draft.id === fromId ? toId : item.draft.id,
-          ingredients: item.draft.ingredients.map((ingredient) => ({
-            ...ingredient,
-            catalogId: ingredient.catalogId === fromId ? toId : ingredient.catalogId,
-            subRecipeId: ingredient.subRecipeId === fromId ? toId : ingredient.subRecipeId,
-          })),
-        },
+        draft: remapDraft(item.draft),
+        createDraft: item.createDraft ? remapDraft(item.createDraft) : undefined,
       };
     }
     if (item.type === 'deleteRecipe') {

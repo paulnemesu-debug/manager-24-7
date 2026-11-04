@@ -23,6 +23,13 @@ describe('translations', () => {
     expect(translate('ro', 'recipes.count', { count: 4 })).toBe('4 preparate analizate');
   });
 
+  it.each([['ro', 'Perioada · 2026-11'], ['en', 'Period · 2026-11']] as const)(
+    'includes the selected menu analysis month in %s',
+    (locale, expected) => {
+      expect(translate(locale, 'menu.period', { value: '2026-11' })).toBe(expected);
+    },
+  );
+
   it('leaves unknown parameters untouched instead of printing undefined', () => {
     expect(translate('ro', 'recipes.count')).toContain('{count}');
   });

@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-const state = vi.hoisted(() => ({ calls: [] as string[], uploaded: [] as string[], removed: [] as string[], payload: {} as Record<string, unknown>, uploadError: false, rpcError: null as { code?: string; message: string } | null, storedPath: 'user/old.jpg' as string | null, legacy: false, attachmentError: null as { code?: string; message: string } | null, readError: false, attachmentVersion: '' }));
+const state = vi.hoisted(() => ({ calls: [] as string[], uploaded: [] as string[], removed: [] as string[], payload: {} as Record<string, unknown>, uploadError: false, rpcError: null as { code?: string; message: string } | null, storedPath: 'user/old.jpg' as string | null, legacy: false, attachmentError: null as { code?: string; message: string } | null, readError: false, attachmentVersion: '', createReceipt: false }));
 vi.mock('@react-native-async-storage/async-storage', () => ({ default: {} }));
 vi.mock('@/lib/document-bytes', () => ({ readDocumentBytes: async () => new Uint8Array([1, 2, 3]).buffer }));
 vi.mock('@/lib/supabase', () => ({ isDemoMode: false, supabase: {
@@ -7,8 +7,14 @@ vi.mock('@/lib/supabase', () => ({ isDemoMode: false, supabase: {
   rpc: async (name: string, args: { p_recipe?: Record<string, unknown> }) => {
     state.calls.push(name);
     if (name === 'foodcost_capture_recipe_version') return { data: null, error: null };
+    if (name === 'foodcost_create_recipe_once' && state.createReceipt) {
+      return { data: { recipe_id: 'recipe-id', created_version: '2026-10-04T10:01:00Z', replayed: true }, error: null };
+    }
     state.payload = args.p_recipe ?? {};
     if (!state.rpcError && !state.legacy && 'photo_path' in state.payload) state.storedPath = state.payload.photo_path as string | null;
+    if (name === 'foodcost_create_recipe_once') {
+      return { data: { recipe_id: 'recipe-id', created_version: '2026-10-04T10:01:00Z', replayed: false }, error: state.rpcError };
+    }
     return { data: 'recipe-id', error: state.rpcError };
   },
   storage: { from: () => ({
@@ -28,7 +34,7 @@ vi.mock('@/lib/supabase', () => ({ isDemoMode: false, supabase: {
 import { createEmptyRecipe } from '@/lib/calculations';
 import { RecipeSaveIncompleteError, saveRecipe } from '@/lib/recipes-repository';
 const draft = () => ({ ...createEmptyRecipe(), id: 'recipe-id', title: 'Preparat', photoPath: 'user/old.jpg', photoUri: 'file:///documents/new.jpg' });
-beforeEach(() => { state.calls = []; state.uploaded = []; state.removed = []; state.payload = {}; state.uploadError = false; state.rpcError = null; state.storedPath = 'user/old.jpg'; state.legacy = false; state.attachmentError = null; state.readError = false; state.attachmentVersion = ''; });
+beforeEach(() => { state.calls = []; state.uploaded = []; state.removed = []; state.payload = {}; state.uploadError = false; state.rpcError = null; state.storedPath = 'user/old.jpg'; state.legacy = false; state.attachmentError = null; state.readError = false; state.attachmentVersion = ''; state.createReceipt = false; });
 it('attaches the new photo in the same recipe transaction, then removes the old object', async () => {
   const result = await saveRecipe(draft()); expect(state.calls.indexOf('upload')).toBeLessThan(state.calls.indexOf('foodcost_save_recipe'));
   expect(state.payload.photo_path).toBe(state.uploaded[0]); expect(state.removed).toEqual(['user/old.jpg']); expect(result.photoPath).toBe(state.uploaded[0]);
@@ -65,4 +71,25 @@ it('a failed legacy attachment preserves the confirmed ID and version for retry'
 it('a lost read after a confirmed insert retains its cloud ID and never reports a complete save', async () => {
   state.readError = true; const error = await saveRecipe({ ...draft(), id: undefined }).catch((caught) => caught);
   expect(error).toBeInstanceOf(RecipeSaveIncompleteError); expect(error.retryDraft.id).toBe('recipe-id'); expect(state.removed).toEqual([]);
+});
+it('recovers a committed create and its photo without re-reading the local photo or uploading it again', async () => {
+  state.createReceipt = true;
+  state.uploadError = true;
+  const result = await saveRecipe({ ...draft(), id: undefined }, { createRequestId: 'offline-recipe-photo', retry: true });
+  expect(result).toMatchObject({ id: 'recipe-id', photoPath: 'user/old.jpg', createdVersion: '2026-10-04T10:01:00Z' });
+  expect(state.calls).toEqual(['foodcost_create_recipe_once']);
+  expect(state.removed).toEqual([]);
+});
+it('keeps the original photo if another retry wins after the receipt lookup', async () => {
+  state.createReceipt = true;
+  const result = await saveRecipe({ ...draft(), id: undefined }, { createRequestId: 'offline-recipe-photo' });
+  expect(result.photoPath).toBe('user/old.jpg');
+  expect(state.uploaded).toHaveLength(1);
+  expect(state.removed).toEqual(state.uploaded);
+  expect(state.calls).not.toContain('attach');
+});
+it('keeps the source recipe photo when a new copy uploads its own photo', async () => {
+  const result = await saveRecipe({ ...draft(), id: undefined }, { createRequestId: 'offline-recipe-copy' });
+  expect(result.photoPath).toBe(state.uploaded[0]);
+  expect(state.removed).toEqual([]);
 });

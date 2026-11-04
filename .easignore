@@ -26,3 +26,4 @@ ios/
 *.log
 *.tsbuildinfo
 .DS_Store
+supabase/.temp/

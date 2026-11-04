@@ -722,7 +722,7 @@ function EquipmentMaintenanceSession({ userId }: { userId: string }) {
                 )
               }
             />
-          )}{" "}
+          )}
           {buttons("entries", true)}
         </Card>
       )}

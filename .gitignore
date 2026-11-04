@@ -54,3 +54,4 @@ android/keystore.properties
 *.keystore
 .superpowers/
 qa-results/
+supabase/.temp/

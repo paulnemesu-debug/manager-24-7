@@ -22,7 +22,7 @@ import { useI18n } from '@/contexts/locale-context';
 import { usePreferences } from '@/contexts/preferences-context';
 import { useWorkspace } from '@/contexts/workspace-context';
 import { listLocations, type BusinessLocation } from '@/lib/locations-repository';
-import { createManagementId, loadManagementSnapshots, saveInventoryCount } from '@/lib/management-repository';
+import { createManagementId, loadManagementSnapshots, saveInventoryCount, type ManagementSnapshot } from '@/lib/management-repository';
 import { buildRestockSuggestions, groupRestockBySupplier, nextInventoryDueDate, totalWasteValue } from '@/lib/operations-control';
 import {
   loadOperationsControlData,
@@ -68,8 +68,9 @@ export default function OperationsControlScreen() {
   const [locations, setLocations] = useState<BusinessLocation[]>([]);
   const [locationId, setLocationId] = useState('all');
   const [policies, setPolicies] = useState<Record<string, PolicyDraftRow>>({});
-  const [onHand, setOnHand] = useState<Record<string, string>>({});
-  const [counts, setCounts] = useState<Record<string, string>>({});
+  const [inventoryHistory, setInventoryHistory] = useState<{ owner: string; snapshots: ManagementSnapshot[] }>();
+  const [stockDrafts, setStockDrafts] = useState<Record<string, Record<string, string>>>({});
+  const [countDrafts, setCountDrafts] = useState<Record<string, Record<string, string>>>({});
   const [busy, setBusy] = useState(false);
   const [wasteDate, setWasteDate] = useState(localIsoDate());
   const [wasteCatalogId, setWasteCatalogId] = useState<string | null>(null);
@@ -83,6 +84,23 @@ export default function OperationsControlScreen() {
   const scheduleDirty = useRef(false);
 
   const actualLocationId = locationId === 'all' ? null : locationId;
+  const locationScope = JSON.stringify([userId, actualLocationId]);
+  const counts = countDrafts[locationScope] ?? {};
+  const stockDraft = stockDrafts[locationScope];
+  const onHand = useMemo(() => {
+    const lastCounts = new Map<string, string>();
+    if (inventoryHistory?.owner === userId) {
+      for (const snapshot of inventoryHistory.snapshots) {
+        if (snapshot.locationId !== actualLocationId) continue;
+        for (const line of snapshot.inventory) {
+          if (line.catalogId && !lastCounts.has(line.catalogId)) {
+            lastCounts.set(line.catalogId, String(line.closingQuantity));
+          }
+        }
+      }
+    }
+    return { ...Object.fromEntries(lastCounts), ...stockDraft };
+  }, [actualLocationId, inventoryHistory, stockDraft, userId]);
   useFocusedSyncRetry(useCallback(() => loadOperationsControlData(userId).then(setData), [userId]));
 
   useEffect(() => {
@@ -90,16 +108,21 @@ export default function OperationsControlScreen() {
     void Promise.all([
       loadOperationsControlData(userId),
       listLocations(userId),
-      loadManagementSnapshots(userId),
-    ]).then(([nextData, nextLocations, snapshots]) => {
+    ]).then(([nextData, nextLocations]) => {
       if (!active) return;
       setData(nextData);
       setLocations(nextLocations);
-      const latest = snapshots[0];
-      if (latest) setOnHand(Object.fromEntries(latest.inventory.filter((line) => line.catalogId).map((line) => [line.catalogId!, String(line.closingQuantity)])));
     }).catch(() => undefined);
     return () => { active = false; };
   }, [userId]);
+
+  useEffect(() => {
+    let active = true;
+    void loadManagementSnapshots(userId, { locationId: actualLocationId }).then(snapshots => {
+      if (active) setInventoryHistory({ owner: userId, snapshots });
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [userId, actualLocationId]);
 
   useEffect(() => {
     setWasteCatalogId((current) => current ?? catalog[0]?.id ?? null);
@@ -295,8 +318,16 @@ export default function OperationsControlScreen() {
         locationId: actualLocationId,
         notes: tr("Inventar recurent pe zone de depozitare"),
       });
-      setOnHand((current) => ({ ...current, ...Object.fromEntries(inventory.map((line) => [line.catalogId!, String(line.closingQuantity)])) }));
-      setCounts({});
+      setInventoryHistory((current) => current && current.owner !== userId ? current : {
+        owner: userId, snapshots: [snapshot, ...(current?.snapshots ?? []).filter(item => item.id !== snapshot.id)],
+      });
+      const savedIds = new Set(inventory.map(line => line.catalogId));
+      setStockDrafts((current) => ({ ...current, [locationScope]: Object.fromEntries(
+        Object.entries(current[locationScope] ?? {}).filter(([id, value]) => !savedIds.has(id) || value !== stockDraft?.[id]),
+      ) }));
+      setCountDrafts((current) => ({ ...current, [locationScope]: Object.fromEntries(
+        Object.entries(current[locationScope] ?? {}).filter(([id, value]) => !savedIds.has(id) || value !== counts[id]),
+      ) }));
       Alert.alert(tr("Inventar salvat"), snapshot.syncState === 'synced' ? tr("Numărătoarea a fost sincronizată.") : tr("Numărătoarea este disponibilă offline."));
     } catch (error) {
       Alert.alert(tr("Inventarul nu s-a salvat"), error instanceof Error ? error.message : tr("Încearcă din nou."));
@@ -356,7 +387,7 @@ export default function OperationsControlScreen() {
                     <StatusPill label={displayUnit(item.priceUnit, locale)} status="neutral" />
                   </View>
                   <View style={styles.fieldRow}>
-                    <Field style={styles.smallField} label={tr("În stoc")} keyboardType="decimal-pad" value={onHand[item.id] ?? ''} onChangeText={(value) => setOnHand((current) => ({ ...current, [item.id]: value }))} />
+                    <Field style={styles.smallField} label={tr("În stoc")} keyboardType="decimal-pad" value={onHand[item.id] ?? ''} onChangeText={(value) => setStockDrafts((current) => ({ ...current, [locationScope]: { ...current[locationScope], [item.id]: value } }))} />
                     <Field style={styles.smallField} label={tr("Minim")} keyboardType="decimal-pad" value={row.minimum} onChangeText={(value) => { formDirty.current = true; setPolicies((current) => ({ ...current, [item.id]: { ...row, minimum: value } })); }} />
                     <Field style={styles.smallField} label={tr("Țintă")} keyboardType="decimal-pad" value={row.target} onChangeText={(value) => { formDirty.current = true; setPolicies((current) => ({ ...current, [item.id]: { ...row, target: value } })); }} />
                   </View>
@@ -467,7 +498,7 @@ export default function OperationsControlScreen() {
               {ingredients.map((item) => (
                 <View key={item.id} style={styles.countRow}>
                   <View style={styles.copy}><Text style={styles.name}>{item.name}</Text><Text style={styles.meta}>{tr("Ultimul:")} {onHand[item.id] ? format.number(numeric(onHand[item.id])) : '—'} {displayUnit(item.priceUnit, locale)}</Text></View>
-                  <Field style={styles.countField} label={`${tr("Real")} ${displayUnit(item.priceUnit, locale)}`} keyboardType="decimal-pad" value={counts[item.id] ?? ''} onChangeText={(value) => setCounts((current) => ({ ...current, [item.id]: value }))} />
+                  <Field style={styles.countField} label={`${tr("Real")} ${displayUnit(item.priceUnit, locale)}`} keyboardType="decimal-pad" value={counts[item.id] ?? ''} onChangeText={(value) => setCountDrafts((current) => ({ ...current, [locationScope]: { ...current[locationScope], [item.id]: value } }))} />
                 </View>
               ))}
             </Card>

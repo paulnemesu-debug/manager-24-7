@@ -9,6 +9,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { parseAllergens } from '@/constants/allergens';
 import { isDemoMode, supabase } from '@/lib/supabase';
+import { mergeCatalogPriceUpdate } from '@/lib/catalog-price-update';
 import { isInstantDemoActive } from '@/lib/demo-isolation';
 import { withStorageLock } from '@/lib/storage-lock';
 import { enrichIngredientNutrition, normalizeIngredientNutrition } from '@/lib/nutrition';
@@ -147,6 +148,7 @@ export async function listCatalog(): Promise<CatalogIngredient[]> {
 
 export async function saveCatalogIngredient(
   draft: CatalogIngredientDraft,
+  expectedUserId?: string,
 ): Promise<CatalogIngredient> {
   draft = enrichIngredientNutrition(draft);
   if (isDemoMode || isInstantDemoActive() || !supabase) {
@@ -163,8 +165,9 @@ export async function saveCatalogIngredient(
     });
   }
 
-  const userId = await currentUserId();
+  const userId = expectedUserId ?? await currentUserId();
   const payload = {
+    id: draft.id,
     user_id: userId,
     name: draft.name.trim(),
     normalized_name: normalizeName(draft.name),
@@ -182,52 +185,25 @@ export async function saveCatalogIngredient(
     additives: draft.additives ?? [],
     nutrition: normalizeIngredientNutrition(draft.nutrition),
     active: draft.active,
-    updated_at: new Date().toISOString(),
   };
 
-  const query = draft.id
-    ? supabase.from('ingredient_catalog').upsert({ ...payload, id: draft.id })
-    : supabase.from('ingredient_catalog').upsert(payload, { onConflict: 'user_id,normalized_name' });
-
-  const { data, error } = await query
-    .select('id, name, purchase_price, price_unit, package_quantity, package_price, default_loss_percent, supplier, price_source, price_source_date, notes, allergens, allergens_confirmed, additives, nutrition, active, updated_at')
-    .single();
+  const offers = draft.offers?.filter((offer) => offer.supplierName.trim()).map((offer) => ({
+    id: offer.id,
+    supplier_name: offer.supplierName.trim(),
+    unit_price: offer.unitPrice,
+    price_unit: offer.priceUnit,
+    package_quantity: offer.packageQuantity,
+    package_price: offer.packagePrice,
+    source: offer.source?.trim() || null,
+    source_date: offer.sourceDate || null,
+    is_active: offer.isActive,
+  }));
+  const { data, error } = await supabase.rpc('foodcost_save_catalog_ingredient', {
+    p_ingredient: payload,
+    p_offers: offers ?? null,
+  });
   if (error) throw error;
-  const saved = data as DbCatalogRow;
-  if (draft.offers) {
-    const { error: deleteError } = await supabase
-      .from('ingredient_supplier_offers')
-      .delete()
-      .eq('catalog_id', saved.id);
-    if (deleteError) throw deleteError;
-    const offers = draft.offers.filter((offer) => offer.supplierName.trim());
-    if (offers.length) {
-      const { error: offerError } = await supabase.from('ingredient_supplier_offers').insert(
-        offers.map((offer) => ({
-          id: offer.id.startsWith('offer-') ? undefined : offer.id,
-          user_id: userId,
-          catalog_id: saved.id,
-          supplier_name: offer.supplierName.trim(),
-          unit_price: offer.unitPrice,
-          price_unit: offer.priceUnit,
-          package_quantity: offer.packageQuantity,
-          package_price: offer.packagePrice,
-          source: offer.source?.trim() || null,
-          source_date: offer.sourceDate || null,
-          is_active: offer.isActive,
-        })),
-      );
-      if (offerError) throw offerError;
-    }
-  }
-  const mapped = mapCatalog(saved);
-  return {
-    ...mapped,
-    offers: (draft.offers ?? []).map((offer) => ({
-      ...offer,
-      updatedAt: new Date().toISOString(),
-    })),
-  };
+  return mapCatalog(data as DbCatalogRow);
 }
 
 export async function deleteCatalogIngredient(catalogId: string): Promise<void> {
@@ -245,38 +221,34 @@ export async function deleteCatalogIngredient(catalogId: string): Promise<void> 
 /** Aplică prețuri noi pentru mai multe ingrediente deodată (import listă furnizor). */
 export async function applyPriceUpdates(
   updates: readonly CatalogPriceUpdate[],
-): Promise<void> {
-  if (!updates.length) return;
+  expectedUserId?: string,
+): Promise<CatalogIngredient[]> {
+  if (!updates.length) return [];
 
   if (isDemoMode || isInstantDemoActive() || !supabase) {
-    await withStorageLock(DEMO_KEY, async () => {
+    return withStorageLock(DEMO_KEY, async () => {
       const entries = await readDemoCatalog();
       const byId = new Map(updates.map((update) => [update.id, update]));
-      await setDemoCatalog(entries.map((entry) => {
+      const now = new Date().toISOString();
+      const next = entries.map((entry) => {
         const update = byId.get(entry.id);
-        return update ? { ...entry, purchasePrice: update.purchasePrice,
-          supplier: update.supplier ?? entry.supplier,
-          priceSource: update.source ?? null, priceSourceDate: update.sourceDate ?? null,
-          updatedAt: new Date().toISOString() } : entry;
-      }));
+        return update ? mergeCatalogPriceUpdate(entry, update, now) : entry;
+      });
+      await setDemoCatalog(next);
+      return next.filter(entry => byId.has(entry.id));
     });
-    return;
   }
 
-  const now = new Date().toISOString();
-  for (const update of updates) {
-    const { error } = await supabase
-      .from('ingredient_catalog')
-      .update({
-        purchase_price: update.purchasePrice,
-        supplier: update.supplier ?? undefined,
-        price_source: update.source ?? null,
-        price_source_date: update.sourceDate ?? null,
-        updated_at: now,
-      })
-      .eq('id', update.id);
-    if (error) throw error;
-  }
+  const userId = expectedUserId ?? await currentUserId();
+  const { data, error } = await supabase.rpc('foodcost_apply_catalog_price_updates', {
+    p_owner_id: userId,
+    p_updates: updates.map(update => ({
+      id: update.id, purchase_price: update.purchasePrice, supplier: update.supplier,
+      source: update.source ?? null, source_date: update.sourceDate ?? null,
+    })),
+  });
+  if (error) throw error;
+  return (data as DbCatalogRow[]).map(mapCatalog);
 }
 
 export type PriceHistoryEntry = {

@@ -21,11 +21,12 @@ const text = (v: unknown): v is string =>
   typeof v === "string" && v.length <= 1000000;
 const timestamp = (v: unknown): v is string =>
   text(v) &&
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(
     v,
   ) &&
   productionDateValid(v.slice(0, 10)) &&
-  Number.isFinite(Date.parse(v));
+  // PostgreSQL emits microseconds. Use milliseconds for JavaScript validation.
+  Number.isFinite(Date.parse(v.replace(/\.(\d{1,6})/, (_, digits: string) => `.${digits.slice(0, 3).padEnd(3, "0")}`)));
 export function normalizeProductionSheet(
   value: unknown,
 ): ProductionSheet | null {

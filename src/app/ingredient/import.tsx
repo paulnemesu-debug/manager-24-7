@@ -100,7 +100,7 @@ export default function ImportPricesScreen() {
       .map((match) => ({
         id: match.catalog.id,
         purchasePrice: match.newPrice,
-        supplier: 'METRO',
+        supplier: match.row.supplier,
         source: 'supplier_import',
         sourceDate,
       }));
@@ -146,7 +146,7 @@ export default function ImportPricesScreen() {
         name: row.name,
         purchasePrice: row.price,
         priceUnit: row.unit ?? 'kg',
-        supplier: 'METRO',
+        supplier: row.supplier ?? null,
         notes: row.notes,
       })));
       Alert.alert(t('import.newItemsAddedTitle'), t('import.newItemsAddedBody', { count }));

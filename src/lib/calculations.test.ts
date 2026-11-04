@@ -55,6 +55,12 @@ describe('food cost calculations', () => {
     expect(calculateUnitPrice(112, 0)).toBeNull();
   });
 
+  it('keeps a missing pack price distinct from an explicit zero price', () => {
+    expect(calculateUnitPrice(null, 6)).toBeNull();
+    expect(calculateUnitPrice(undefined, 6)).toBeNull();
+    expect(calculateUnitPrice(0, 6)).toBe(0);
+  });
+
   it('converts grams to kilograms and includes loss', () => {
     const cost = calculateIngredientCost(ingredient({
       name: 'Piept de pui',

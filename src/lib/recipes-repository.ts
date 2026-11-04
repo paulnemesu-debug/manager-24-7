@@ -171,6 +171,18 @@ async function currentUserId() {
   return data.user.id;
 }
 
+async function recipeAuthorization(userId?: string): Promise<string | undefined> {
+  if (!userId || !supabase) return undefined;
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  if (data.session?.user.id !== userId || !data.session.access_token) throw new Error('workspace-changed');
+  return `Bearer ${data.session.access_token}`;
+}
+
+function authorizeRecipeRequest<T extends { setHeader(name: string, value: string): T }>(request: T, authorization?: string): T {
+  return authorization ? request.setHeader('Authorization', authorization) : request;
+}
+
 async function saveDemoRecipe(draft: RecipeDraft): Promise<Recipe> {
   return withStorageLock(DEMO_KEY, async () => {
     const recipes = await readDemoRecipes();
@@ -190,18 +202,36 @@ async function saveDemoRecipe(draft: RecipeDraft): Promise<Recipe> {
   });
 }
 
-export async function listRecipes(): Promise<Recipe[]> {
+export async function listRecipes(knownRecipes: readonly Recipe[] = [], userId?: string): Promise<Recipe[]> {
   if (isDemoMode || isInstantDemoActive() || !supabase) return getDemoRecipes();
-  const { data, error } = await supabase
+  const authorization = await recipeAuthorization(userId);
+  const { data, error } = await authorizeRecipeRequest(supabase
     .from('recipes')
     .select(RECIPE_SELECT)
-    .order('updated_at', { ascending: false });
+    .order('updated_at', { ascending: false }), authorization);
   if (error) throw error;
-  const rows = data as DbRecipe[];
+  const rowsById = new Map((data as DbRecipe[]).map((row) => [row.id, row]));
+  // A list can omit known rows (for example, at the server's response limit).
+  // Check them under the same RLS policies before replacing the local snapshot.
+  const idsToVerify = [...new Set(knownRecipes.filter((recipe) => {
+    if (recipe.id.startsWith('offline-')) return false;
+    const row = rowsById.get(recipe.id);
+    return !row || Date.parse(row.updated_at) < Date.parse(recipe.serverUpdatedAt ?? '');
+  }).map((recipe) => recipe.id))];
+  const batchSize = 100;
+  for (let index = 0; index < idsToVerify.length; index += batchSize) {
+    const ids = idsToVerify.slice(index, index + batchSize);
+    const verified = await authorizeRecipeRequest(supabase.from('recipes').select(RECIPE_SELECT).in('id', ids), authorization);
+    if (verified.error) throw verified.error;
+    ids.forEach((id) => rowsById.delete(id));
+    for (const row of verified.data as DbRecipe[]) rowsById.set(row.id, row);
+  }
+  const rows = [...rowsById.values()];
   const paths = [...new Set(rows.map((row) => row.photo_path).filter((path): path is string => Boolean(path)))];
   const signedByPath = new Map<string, string>();
   if (paths.length) {
-    const signed = await supabase.storage.from('recipe-images').createSignedUrls(paths, 60 * 60 * 24 * 7);
+    const bucket = authorizeRecipeRequest(supabase.storage.from('recipe-images'), authorization);
+    const signed = await bucket.createSignedUrls(paths, 60 * 60 * 24 * 7);
     signed.data?.forEach((item) => {
       if (item.path && item.signedUrl) signedByPath.set(item.path, item.signedUrl);
     });
@@ -252,7 +282,7 @@ function recipePayload(draft: RecipeDraft) {
   };
 }
 
-async function stageRecipePhoto(draft: RecipeDraft): Promise<{ changed: boolean; path: string | null; uploaded: boolean }> {
+async function stageRecipePhoto(draft: RecipeDraft, scopedUserId?: string, authorization?: string): Promise<{ changed: boolean; path: string | null; uploaded: boolean }> {
   if (!supabase) return { changed: false, path: draft.photoPath ?? null, uploaded: false };
   if (draft.photoAction === 'remove') return { changed: true, path: null, uploaded: false };
   const uri = draft.photoUri ?? null;
@@ -260,10 +290,11 @@ async function stageRecipePhoto(draft: RecipeDraft): Promise<{ changed: boolean;
     // Missing/expired preview URLs are not an instruction to remove a photo.
     return { changed: false, path: draft.photoPath ?? null, uploaded: false };
   }
-  const userId = await currentUserId();
+  const userId = scopedUserId ?? await currentUserId();
   const payload = await readDocumentBytes(uri, 5_000_000, 'RECIPE_PHOTO_TOO_LARGE');
   const path = `${userId}/recipe-${Date.now()}-${Math.random().toString(16).slice(2)}.jpg`;
-  const uploaded = await supabase.storage.from('recipe-images').upload(path, payload, {
+  const bucket = authorizeRecipeRequest(supabase.storage.from('recipe-images'), authorization);
+  const uploaded = await bucket.upload(path, payload, {
     contentType: 'image/jpeg', cacheControl: '31536000', upsert: false,
   });
   if (uploaded.error) throw uploaded.error;
@@ -272,59 +303,104 @@ async function stageRecipePhoto(draft: RecipeDraft): Promise<{ changed: boolean;
 
 /** The core save was confirmed: retry this ID, never insert a second recipe. */
 export class RecipeSaveIncompleteError extends Error {
-  constructor(public retryDraft: RecipeDraft, public savedRecipe: Recipe | null, public originalError: unknown) {
+  constructor(public retryDraft: RecipeDraft, public savedRecipe: Recipe | null, public originalError: unknown, public createRequestId?: string) {
     super('Rețeta este salvată în cont, dar confirmarea completă sau atașarea fotografiei a eșuat. Schița este păstrată pentru reluare.');
     this.name = 'RecipeSaveIncompleteError';
   }
 }
 
-export async function saveRecipe(draft: RecipeDraft): Promise<Recipe> {
+type RecipeCreateReceipt = { recipe_id: string; created_version: string; replayed: boolean };
+type RecipeSaveOptions = { userId?: string; createRequestId?: string; retry?: boolean };
+type RecipeSaveResult = Recipe & { createdVersion?: string };
+
+async function lookupCreateReceipt(requestId: string, authorization?: string): Promise<RecipeCreateReceipt | null> {
+  if (!supabase) throw new Error('missing-client');
+  const lookup = await authorizeRecipeRequest(supabase.rpc('foodcost_create_recipe_once', {
+    p_recipe: null, p_request_id: requestId,
+  }), authorization);
+  if (lookup.error) throw lookup.error;
+  return lookup.data as RecipeCreateReceipt | null;
+}
+
+export async function cancelRecipeCreate(requestId: string, userId?: string): Promise<void> {
+  if (!supabase) throw new Error('missing-client');
+  const authorization = await recipeAuthorization(userId);
+  const { error } = await authorizeRecipeRequest(supabase.rpc('foodcost_cancel_recipe_create', { p_request_id: requestId }), authorization);
+  if (error) throw error;
+}
+
+export async function saveRecipe(draft: RecipeDraft, options?: RecipeSaveOptions): Promise<RecipeSaveResult> {
   draft = enrichRecipeNutrition(draft);
   if (isDemoMode || isInstantDemoActive() || !supabase) return saveDemoRecipe(draft);
+  const authorization = await recipeAuthorization(options?.userId);
+  const createRequestId = options?.createRequestId;
+  const bucket = () => authorizeRecipeRequest(supabase!.storage.from('recipe-images'), authorization);
   if (draft.id) {
-    const { error: versionError } = await supabase.rpc('foodcost_capture_recipe_version', { p_recipe_id: draft.id });
+    const { error: versionError } = await authorizeRecipeRequest(supabase.rpc('foodcost_capture_recipe_version', {
+      p_recipe_id: draft.id,
+    }), authorization);
     if (versionError) throw versionError;
   }
-  // A failed upload saves nothing. Updated servers attach in the transaction;
-  // older servers need a version-checked attachment after the confirmed save.
-  const photo = await stageRecipePhoto(draft);
-  const payload = { ...recipePayload(draft), ...(photo.changed ? { photo_path: photo.path } : {}) };
-  const { data: recipeId, error } = await supabase.rpc('foodcost_save_recipe', { p_recipe: payload });
-  if (error) {
-    // A network failure may have lost a committed response. Keep its upload;
-    // only a definite database rejection makes deleting the staged object safe.
-    if (photo.uploaded && photo.path && /^[A-Z0-9]{5}$/.test(error.code ?? '')) {
-      await supabase.storage.from('recipe-images').remove([photo.path]).catch(() => undefined);
+  let receipt = createRequestId && options?.retry ? await lookupCreateReceipt(createRequestId, authorization) : null;
+  let photo: Awaited<ReturnType<typeof stageRecipePhoto>> = { changed: false, path: null, uploaded: false };
+  let recipeId = receipt?.recipe_id;
+  if (!recipeId) {
+    // The original transaction attaches the photo. A replay keeps that attachment.
+    photo = await stageRecipePhoto(draft, options?.userId, authorization);
+    const payload = { ...recipePayload(draft), ...(photo.changed ? { photo_path: photo.path } : {}) };
+    const request = createRequestId
+      ? supabase.rpc('foodcost_create_recipe_once', { p_recipe: payload, p_request_id: createRequestId })
+      : supabase.rpc('foodcost_save_recipe', { p_recipe: payload });
+    const result = await authorizeRecipeRequest(request, authorization);
+    if (result.error) {
+      // A network failure may have lost a committed response. Keep its upload.
+      if (photo.uploaded && photo.path && /^[A-Z0-9]{5}$/.test(result.error.code ?? '')) {
+        await bucket().remove([photo.path]).catch(() => undefined);
+      }
+      throw result.error;
     }
-    throw error;
+    receipt = createRequestId ? result.data as RecipeCreateReceipt : null;
+    recipeId = createRequestId ? receipt?.recipe_id : result.data as string;
+    if (!recipeId) throw new Error('Connection lost before recipe confirmation');
   }
-  const { data: saved, error: readError } = await supabase.from('recipes')
-    .select(RECIPE_SELECT).eq('id', recipeId as string).single();
-  if (readError) throw new RecipeSaveIncompleteError({ ...draft, id: recipeId as string }, null, readError);
+  if (receipt?.replayed && photo.uploaded && photo.path) {
+    // A concurrent request may have completed after the receipt lookup.
+    await bucket().remove([photo.path]).catch(() => undefined);
+  }
+  const { data: saved, error: readError } = await authorizeRecipeRequest(supabase.from('recipes')
+    .select(RECIPE_SELECT).eq('id', recipeId).single(), authorization);
+  if (readError) {
+    // Keep the editor and queue on the same receipt. A cloud ID here would
+    // turn a retry into an unconditional edit of a potentially newer row.
+    if (receipt && createRequestId) {
+      throw new RecipeSaveIncompleteError({ ...draft, id: createRequestId }, null, readError, createRequestId);
+    }
+    throw new RecipeSaveIncompleteError({ ...draft, id: recipeId }, null, readError);
+  }
   let row = saved as DbRecipe;
-  if (photo.changed && row.photo_path !== photo.path) {
-    const attached = await supabase.from('recipes').update({ photo_path: photo.path })
-      .eq('id', row.id).eq('updated_at', row.updated_at).select(RECIPE_SELECT).maybeSingle();
+  if (!receipt && photo.changed && row.photo_path !== photo.path) {
+    const attached = await authorizeRecipeRequest(supabase.from('recipes').update({ photo_path: photo.path })
+      .eq('id', row.id).eq('updated_at', row.updated_at).select(RECIPE_SELECT).maybeSingle(), authorization);
     if (attached.error || !attached.data) {
       const attachmentError = attached.error ?? new Error('RECIPE_CONFLICT');
       if (photo.uploaded && photo.path && !attached.data && /^[A-Z0-9]{5}$/.test(attached.error?.code ?? '')) {
-        await supabase.storage.from('recipe-images').remove([photo.path]).catch(() => undefined);
+        await bucket().remove([photo.path]).catch(() => undefined);
       }
       throw new RecipeSaveIncompleteError({ ...draft, id: row.id, expectedUpdatedAt: row.updated_at, photoPath: row.photo_path }, mapRecipe(row), attachmentError);
     }
     row = attached.data as DbRecipe;
   }
-  if (photo.changed && draft.photoPath && draft.photoPath !== photo.path) {
-    await supabase.storage.from('recipe-images').remove([draft.photoPath]).catch(() => undefined);
+  if (draft.id && !receipt?.replayed && photo.changed && draft.photoPath && draft.photoPath !== photo.path) {
+    await bucket().remove([draft.photoPath]).catch(() => undefined);
   }
-  let photoUrl = row.photo_path ? draft.photoUri ?? null : null;
+  let photoUrl = row.photo_path && !receipt?.replayed ? draft.photoUri ?? null : null;
   if (row.photo_path) {
     try {
-      const signed = await supabase.storage.from('recipe-images').createSignedUrl(row.photo_path, 60 * 60 * 24 * 7);
+      const signed = await bucket().createSignedUrl(row.photo_path, 60 * 60 * 24 * 7);
       photoUrl = signed.data?.signedUrl ?? photoUrl;
     } catch { /* A failed preview must not turn a confirmed save into a retry. */ }
   }
-  return mapRecipe(row, photoUrl);
+  return { ...mapRecipe(row, photoUrl), ...(receipt ? { createdVersion: receipt.created_version } : {}) };
 }
 
 export type RecipeVersion = {
@@ -382,7 +458,7 @@ export async function listRecipeVersions(recipeId: string): Promise<RecipeVersio
   });
 }
 
-export async function deleteRecipe(recipeId: string) {
+export async function deleteRecipe(recipeId: string, userId?: string) {
   if (isDemoMode || isInstantDemoActive() || !supabase) {
     await withStorageLock(DEMO_KEY, async () => {
       const recipes = await readDemoRecipes();
@@ -391,12 +467,13 @@ export async function deleteRecipe(recipeId: string) {
     return;
   }
 
-  const { error: ingredientError } = await supabase
+  const authorization = await recipeAuthorization(userId);
+  const { error: ingredientError } = await authorizeRecipeRequest(supabase
     .from('recipe_ingredients')
     .delete()
-    .eq('recipe_id', recipeId);
+    .eq('recipe_id', recipeId), authorization);
   if (ingredientError) throw ingredientError;
-  const { error } = await supabase.from('recipes').delete().eq('id', recipeId);
+  const { error } = await authorizeRecipeRequest(supabase.from('recipes').delete().eq('id', recipeId), authorization);
   if (error) throw error;
 }
 
@@ -404,7 +481,7 @@ export async function deleteRecipe(recipeId: string) {
  * Scrie înapoi rețetele al căror cost s-a schimbat după o modificare de preț
  * în catalog sau într-un semipreparat. Se apelează după recalculul în memorie.
  */
-export async function persistRecalculated(recipes: readonly Recipe[]): Promise<void> {
+export async function persistRecalculated(recipes: readonly Recipe[], userId?: string): Promise<void> {
   if (!recipes.length) return;
 
   if (isDemoMode || isInstantDemoActive() || !supabase) {
@@ -416,6 +493,7 @@ export async function persistRecalculated(recipes: readonly Recipe[]): Promise<v
     return;
   }
 
-  const { error } = await supabase.rpc('foodcost_recalculate', {});
+  const authorization = await recipeAuthorization(userId);
+  const { error } = await authorizeRecipeRequest(supabase.rpc('foodcost_recalculate', {}), authorization);
   if (error) throw error;
 }

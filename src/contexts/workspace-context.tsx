@@ -28,11 +28,13 @@ import { recordPriceAlert } from '@/lib/price-alert-history';
 import { notifyPriceAlert } from '@/lib/price-alert-notifier';
 import { loadSales } from '@/lib/operations-storage';
 import * as catalogRepository from '@/lib/catalog-repository';
+import { mergeCatalogPriceUpdate } from '@/lib/catalog-price-update';
 import { createEmptyIngredientNutrition, enrichIngredientNutrition, enrichRecipeNutrition } from '@/lib/nutrition';
 import {
   acknowledgePendingOperation,
   clearFailedOperations,
   enqueueOperation,
+  freezePendingRecipeCreate,
   isNetworkError,
   isOfflineId,
   makeOptimisticCatalog,
@@ -44,6 +46,7 @@ import {
   rejectPendingOperation,
   writeWorkspaceCache,
   workspaceErrorMessage,
+  type PendingOperation,
 } from '@/lib/offline-workspace';
 import { resolveRecipeGraph } from '@/lib/recipe-graph';
 import { withStorageLock } from '@/lib/storage-lock';
@@ -84,45 +87,81 @@ type WorkspaceContextValue = {
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
-async function flushPendingOperations(userId: string, assertCurrent: () => void): Promise<number> {
+function queuedRecipeDraft(operation: Extract<PendingOperation, { type: 'saveRecipe' }>): RecipeDraft {
+  return isOfflineId(operation.localId) ? operation.createDraft ?? operation.draft : operation.draft;
+}
+
+function nextWorkspaceOperation(pending: readonly PendingOperation[]): PendingOperation {
+  let operation = pending[0];
+  const visited = new Set<string>();
+  while (operation.type === 'saveRecipe') {
+    if (visited.has(operation.id)) return pending[0];
+    visited.add(operation.id);
+    const dependencies = new Set(queuedRecipeDraft(operation).ingredients
+      .map((ingredient) => ingredient.kind === 'sub_recipe' ? ingredient.subRecipeId : ingredient.catalogId)
+      .filter(isOfflineId));
+    // A later offline ingredient or subrecipe must get a cloud ID first.
+    const prerequisite = pending.find((item) => (item.type === 'saveRecipe' || item.type === 'saveCatalog')
+      && dependencies.has(item.localId));
+    if (!prerequisite) break;
+    operation = prerequisite;
+  }
+  return operation;
+}
+
+async function flushPendingOperations(
+  userId: string,
+  assertCurrent: () => void,
+  onRecipeSaved: (localId: string, saved: Recipe) => void,
+): Promise<void> {
   assertCurrent();
   let pending = await readPendingOperations(userId);
-  let completed = 0;
 
   while (pending.length) {
     assertCurrent();
-    const [operation] = pending;
+    const operation = nextWorkspaceOperation(pending);
     let remap: { from: string; to: string } | null = null;
-    let savedVersion: string | undefined;
+    let savedRecipe: Awaited<ReturnType<typeof recipesRepository.saveRecipe>> | undefined;
 
     try {
       if (operation.type === 'saveCatalog') {
         const saved = await catalogRepository.saveCatalogIngredient({
           ...operation.draft,
           id: isOfflineId(operation.draft.id) ? undefined : operation.draft.id,
-        });
+        }, userId);
         if (saved.id !== operation.localId) remap = { from: operation.localId, to: saved.id };
       } else if (operation.type === 'deleteCatalog') {
         if (!isOfflineId(operation.catalogId)) {
           await catalogRepository.deleteCatalogIngredient(operation.catalogId);
         }
       } else if (operation.type === 'saveRecipe') {
-        const saved = await recipesRepository.saveRecipe({
-          ...operation.draft,
-          id: isOfflineId(operation.draft.id) ? undefined : operation.draft.id,
-        });
-        savedVersion = saved.serverUpdatedAt ?? saved.updatedAt;
-        if (saved.id !== operation.localId) remap = { from: operation.localId, to: saved.id };
+        const isCreate = isOfflineId(operation.localId);
+        if (isCreate && !operation.createDispatched) {
+          await freezePendingRecipeCreate(userId, operation);
+          assertCurrent();
+        }
+        savedRecipe = await recipesRepository.saveRecipe({
+          ...queuedRecipeDraft(operation),
+          id: isCreate ? undefined : operation.draft.id,
+        }, { userId, ...(isCreate ? { createRequestId: operation.localId, retry: true } : {}) });
+        if (savedRecipe.id !== operation.localId) remap = { from: operation.localId, to: savedRecipe.id };
       } else if (operation.type === 'deleteRecipe') {
-        if (!isOfflineId(operation.recipeId)) await recipesRepository.deleteRecipe(operation.recipeId);
+        if (operation.createRequestId) {
+          await recipesRepository.cancelRecipeCreate(operation.createRequestId, userId);
+        } else if (!isOfflineId(operation.recipeId)) {
+          await recipesRepository.deleteRecipe(operation.recipeId, userId);
+        }
       } else {
         await catalogRepository.applyPriceUpdates(
           operation.updates.filter((item) => !isOfflineId(item.id)),
+          userId,
         );
       }
     } catch (caught) {
       assertCurrent();
+      if (workspaceErrorMessage(caught) === 'workspace-changed') throw caught;
       if (caught instanceof recipesRepository.RecipeSaveIncompleteError) {
+        if (caught.createRequestId) throw caught.originalError;
         pending = await rebasePendingRecipeSave(userId, operation, caught.retryDraft);
         assertCurrent();
         if (isNetworkError(caught.originalError)) throw caught.originalError;
@@ -138,11 +177,19 @@ async function flushPendingOperations(userId: string, assertCurrent: () => void)
 
     // A response from an old session must not consume that account's pending intent.
     assertCurrent();
-    pending = await acknowledgePendingOperation(userId, operation, remap, savedVersion);
-    completed += 1;
+    if (operation.type === 'saveRecipe' && savedRecipe) {
+      onRecipeSaved(operation.localId, savedRecipe);
+      if (remap && operation.createDraft) {
+        // Apply an edit to the pending create as a separate version-checked write.
+        pending = await rebasePendingRecipeSave(userId, operation, {
+          ...operation.draft, id: savedRecipe.id,
+          expectedUpdatedAt: savedRecipe.createdVersion ?? savedRecipe.serverUpdatedAt ?? savedRecipe.updatedAt,
+        });
+        continue;
+      }
+    }
+    pending = await acknowledgePendingOperation(userId, operation, remap, savedRecipe?.serverUpdatedAt ?? savedRecipe?.updatedAt);
   }
-
-  return completed;
 }
 
 function createWorkspaceScope(userId: string | null, isDemo: boolean) {
@@ -201,13 +248,13 @@ function WorkspaceSessionProvider({ children, scope }: PropsWithChildren<{ scope
     })
   ), [assertCurrent, userId]);
 
-  const commit = useCallback((nextRecipes: Recipe[], nextCatalog: CatalogIngredient[]) => {
+  const commit = useCallback((nextRecipes: Recipe[], nextCatalog: CatalogIngredient[], persistCache = true) => {
     assertCurrent();
     recipesRef.current = nextRecipes;
     catalogRef.current = nextCatalog;
     setRecipes(nextRecipes);
     setCatalog(nextCatalog);
-    if (userId) void writeWorkspaceCache(userId, nextRecipes, nextCatalog).catch(() => undefined);
+    if (userId && persistCache) void writeWorkspaceCache(userId, nextRecipes, nextCatalog).catch(() => undefined);
   }, [assertCurrent, userId]);
 
   const resolveGraph = useCallback(async (
@@ -222,10 +269,11 @@ function WorkspaceSessionProvider({ children, scope }: PropsWithChildren<{ scope
       try {
         await recipesRepository.persistRecalculated(
           resolved.filter((recipe) => changedIds.includes(recipe.id)),
+          userId ?? undefined,
         );
         assertCurrent();
         // Recalculation can advance the cloud version; acknowledge that version before editing.
-        const loaded = await recipesRepository.listRecipes();
+        const loaded = await recipesRepository.listRecipes(resolved, userId ?? undefined);
         assertCurrent();
         return resolveRecipeGraph(loaded, nextCatalog).recipes;
       } catch {
@@ -236,7 +284,7 @@ function WorkspaceSessionProvider({ children, scope }: PropsWithChildren<{ scope
       }
     }
     return resolved;
-  }, [assertCurrent]);
+  }, [assertCurrent, userId]);
 
   const refresh = useCallback(async () => runScoped(async () => {
     if (!auth.isAuthenticated || !userId) {
@@ -257,7 +305,7 @@ function WorkspaceSessionProvider({ children, scope }: PropsWithChildren<{ scope
     assertCurrent();
     if (cached && !hasVisibleData) {
       const resolved = await resolveGraph(cached.recipes, cached.catalog, false);
-      commit(resolved, cached.catalog);
+      commit(resolved, cached.catalog, false);
       setLastSyncedAt(cached.savedAt);
       setIsLoading(false);
     }
@@ -266,14 +314,32 @@ function WorkspaceSessionProvider({ children, scope }: PropsWithChildren<{ scope
       const queued = await readPendingOperations(userId);
       assertCurrent();
       setPendingChanges(queued.length);
-      if (queued.length) await flushPendingOperations(userId, assertCurrent);
+      if (queued.length) {
+        // The durable queue may be newer than the best-effort display cache.
+        const recipesById = new Map(recipesRef.current.map((recipe) => [recipe.id, recipe]));
+        for (const operation of queued) {
+          if (operation.type === 'saveRecipe') {
+            const id = operation.localId;
+            const existing = recipesById.get(id);
+            recipesById.set(id, makeOptimisticRecipe({ ...operation.draft, id }, existing ? [existing] : []));
+          } else if (operation.type === 'deleteRecipe') {
+            recipesById.delete(operation.recipeId);
+          }
+        }
+        const projected = await resolveGraph([...recipesById.values()], catalogRef.current, false);
+        commit(projected, catalogRef.current, false);
+        await flushPendingOperations(userId, assertCurrent, (localId, saved) => {
+          commit([saved, ...recipesRef.current.filter((recipe) => recipe.id !== localId && recipe.id !== saved.id)],
+            catalogRef.current);
+        });
+      }
       assertCurrent();
       const failed = await readFailedOperations(userId).catch(() => []);
       assertCurrent();
       setFailedChanges(failed.length);
 
       const [loadedRecipes, loadedCatalog] = await Promise.all([
-        recipesRepository.listRecipes(),
+        recipesRepository.listRecipes(recipesRef.current, userId),
         catalogRepository.listCatalog(),
       ]);
       assertCurrent();
@@ -338,31 +404,54 @@ function WorkspaceSessionProvider({ children, scope }: PropsWithChildren<{ scope
       catalogRef.current,
       false,
     );
-    commit(next, catalogRef.current);
-
     if (isOfflineId(draft.id)) {
       const queue = await enqueueOperation(userId, {
         type: 'saveRecipe', localId: optimistic.id, draft: optimisticDraft,
       });
       assertCurrent();
+      commit(next, catalogRef.current);
       setPendingChanges(queue.length);
       setSyncState('offline');
       return optimistic;
     }
 
+    // Persist a stable create intent before the first request can commit.
+    const createQueue = !draft.id && !scope.isDemo ? await enqueueOperation(userId, {
+      type: 'saveRecipe', localId: optimistic.id, draft: optimisticDraft, createDispatched: true,
+    }) : null;
+    const createOperation = createQueue?.find((operation): operation is Extract<PendingOperation, { type: 'saveRecipe' }> =>
+      operation.type === 'saveRecipe' && operation.localId === optimistic.id);
+    assertCurrent();
+    commit(next, catalogRef.current);
+
     try {
-      const saved = await recipesRepository.saveRecipe(draft);
+      const saved = await recipesRepository.saveRecipe(draft, { userId, createRequestId: createOperation?.localId });
       const resolved = await resolveGraph(
         [saved, ...recipesRef.current.filter((item) => item.id !== optimistic.id && item.id !== saved.id)],
         catalogRef.current,
         false,
       );
       commit(resolved, catalogRef.current);
+      if (createOperation) {
+        const queue = await acknowledgePendingOperation(userId, createOperation, { from: optimistic.id, to: saved.id })
+          .catch(() => createQueue!);
+        assertCurrent();
+        setPendingChanges(queue.length);
+      }
       setSyncState('online');
       return saved;
     } catch (caught) {
       assertCurrent();
+      if (workspaceErrorMessage(caught) === 'workspace-changed') {
+        commit(before, catalogRef.current);
+        throw caught;
+      }
       if (caught instanceof recipesRepository.RecipeSaveIncompleteError) {
+        if (caught.createRequestId && createQueue) {
+          setPendingChanges(createQueue.length);
+          setSyncState('offline');
+          throw caught;
+        }
         const partial = makeOptimisticRecipe(caught.retryDraft, caught.savedRecipe ? [caught.savedRecipe] : before);
         commit([partial, ...before.filter((item) => item.id !== optimistic.id && item.id !== partial.id)], catalogRef.current);
         const queued = await enqueueOperation(userId, { type: 'saveRecipe', localId: partial.id, draft: caught.retryDraft });
@@ -375,10 +464,11 @@ function WorkspaceSessionProvider({ children, scope }: PropsWithChildren<{ scope
         throw caught;
       }
       if (!isNetworkError(caught)) {
+        if (createOperation) await acknowledgePendingOperation(userId, createOperation);
         commit(before, catalogRef.current);
         throw caught;
       }
-      const queue = await enqueueOperation(userId, {
+      const queue = createQueue ?? await enqueueOperation(userId, {
         type: 'saveRecipe', localId: optimistic.id, draft: optimisticDraft,
       });
       assertCurrent();
@@ -386,7 +476,7 @@ function WorkspaceSessionProvider({ children, scope }: PropsWithChildren<{ scope
       setSyncState('offline');
       return optimistic;
     }
-  }), [assertCurrent, commit, resolveGraph, runScoped, userId]);
+  }), [assertCurrent, commit, resolveGraph, runScoped, scope.isDemo, userId]);
 
   const removeRecipe = useCallback(async (recipeId: string) => runScoped(async () => {
     if (!userId) throw new Error('missing-session');
@@ -399,7 +489,7 @@ function WorkspaceSessionProvider({ children, scope }: PropsWithChildren<{ scope
       return;
     }
     try {
-      await recipesRepository.deleteRecipe(recipeId);
+      await recipesRepository.deleteRecipe(recipeId, userId);
     } catch (caught) {
       assertCurrent();
       if (!isNetworkError(caught)) {
@@ -451,7 +541,7 @@ function WorkspaceSessionProvider({ children, scope }: PropsWithChildren<{ scope
     }
 
     try {
-      const saved = await catalogRepository.saveCatalogIngredient(draft);
+      const saved = await catalogRepository.saveCatalogIngredient(draft, userId);
       const syncedCatalog = [saved, ...catalogRef.current.filter((item) => (
         item.id !== optimistic.id && item.id !== saved.id
       ))].sort((a, b) => a.name.localeCompare(b.name, 'ro-RO'));
@@ -510,18 +600,11 @@ function WorkspaceSessionProvider({ children, scope }: PropsWithChildren<{ scope
     const beforeRecipes = recipesRef.current;
     const beforeCatalog = catalogRef.current;
     const byId = new Map(updates.map((update) => [update.id, update]));
-    const nextCatalog = beforeCatalog.map((entry) => (
-      byId.has(entry.id)
-        ? {
-          ...entry,
-          purchasePrice: byId.get(entry.id)!.purchasePrice,
-          supplier: byId.get(entry.id)!.supplier ?? entry.supplier,
-          priceSource: byId.get(entry.id)!.source ?? entry.priceSource,
-          priceSourceDate: byId.get(entry.id)!.sourceDate ?? entry.priceSourceDate,
-          updatedAt: new Date().toISOString(),
-        }
-        : entry
-    ));
+    const now = new Date().toISOString();
+    const nextCatalog = beforeCatalog.map((entry) => {
+      const update = byId.get(entry.id);
+      return update ? mergeCatalogPriceUpdate(entry, update, now) : entry;
+    });
     const nextRecipes = await resolveGraph(beforeRecipes, nextCatalog, false);
     const beforeTotals = new Map(beforeRecipes.map((recipe) => [recipe.id, recipe.totals.totalCost]));
     const changed = nextRecipes.filter((recipe) => (
@@ -529,8 +612,12 @@ function WorkspaceSessionProvider({ children, scope }: PropsWithChildren<{ scope
     )).length;
     commit(nextRecipes, nextCatalog);
     try {
-      await catalogRepository.applyPriceUpdates(updates);
-      await resolveGraph(nextRecipes, nextCatalog, true);
+      const saved = await catalogRepository.applyPriceUpdates(updates, userId);
+      assertCurrent();
+      const savedById = new Map(saved.map(entry => [entry.id, entry]));
+      const syncedCatalog = nextCatalog.map(entry => savedById.get(entry.id) ?? entry);
+      const syncedRecipes = await resolveGraph(nextRecipes, syncedCatalog, true);
+      commit(syncedRecipes, syncedCatalog);
       setSyncState('online');
     } catch (caught) {
       assertCurrent();

@@ -21,6 +21,7 @@ import { usePreferences } from '@/contexts/preferences-context';
 import { useSubscription } from '@/contexts/subscription-context';
 import { useWorkspace } from '@/contexts/workspace-context';
 import { calculateUnitPrice } from '@/lib/calculations';
+import { reconcileImportedCatalogPrice } from '@/lib/catalog-price-update';
 import { displayUnit } from '@/lib/display-unit';
 import { listPriceHistory, type PriceHistoryEntry } from '@/lib/catalog-repository';
 import { createEmptyIngredientNutrition, enrichIngredientNutrition, normalizeIngredientNutrition } from '@/lib/nutrition';
@@ -59,6 +60,7 @@ function draftFrom(entry?: CatalogIngredient): CatalogIngredientDraft {
       active: true,
     };
   }
+  entry = reconcileImportedCatalogPrice(entry);
   const offers = entry.offers?.length ? entry.offers.map(({ updatedAt: _updatedAt, ...offer }) => offer) : entry.supplier ? [{
     id: `offer-${entry.id}`,
     supplierName: entry.supplier,
@@ -127,13 +129,33 @@ export function IngredientEditor({ entry }: { entry?: CatalogIngredient }) {
   const setField = <K extends keyof CatalogIngredientDraft>(
     field: K,
     value: CatalogIngredientDraft[K],
-  ) => setDraft((current) => ({ ...current, [field]: value }));
+  ) => setDraft((current) => {
+    const next = { ...current, [field]: value };
+    if (field !== 'priceUnit' && field !== 'purchasePrice') return next;
+    const offerChange = field === 'priceUnit'
+      ? { priceUnit: next.priceUnit }
+      : { unitPrice: calculateUnitPrice(next.packagePrice, next.packageQuantity) ?? next.purchasePrice };
+    return {
+      ...next,
+      offers: next.offers?.map((offer) => offer.isActive ? { ...offer, ...offerChange } : offer),
+    };
+  });
 
   const setPackageField = (field: 'packagePrice' | 'packageQuantity', value: number | null) => {
     setDraft((current) => {
       const next = { ...current, [field]: value };
       const unitPrice = calculateUnitPrice(next.packagePrice, next.packageQuantity);
-      return { ...next, purchasePrice: unitPrice ?? current.purchasePrice };
+      const purchasePrice = unitPrice ?? current.purchasePrice;
+      return {
+        ...next,
+        purchasePrice,
+        offers: next.offers?.map((offer) => offer.isActive ? {
+          ...offer,
+          packagePrice: next.packagePrice ?? null,
+          packageQuantity: next.packageQuantity ?? null,
+          unitPrice: purchasePrice,
+        } : offer),
+      };
     });
   };
 
