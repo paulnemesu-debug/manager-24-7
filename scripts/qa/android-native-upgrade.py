@@ -10,6 +10,7 @@ import shlex
 import subprocess
 import sys
 import time
+from urllib.parse import unquote
 import xml.etree.ElementTree as ET
 
 PACKAGE = "ro.paradim.professionalfoodcost"
@@ -68,28 +69,86 @@ def label_matches(node, labels):
     return any(value == label or value.startswith(f"{label}, tab") for value in values for label in labels)
 
 
-def filtered_crashes(log):
-    lines = log.splitlines()
+def safe_exception_message(message):
+    message = unquote(message.replace(r"\/", "/"))
+    message = re.sub(r"\\u00([0-7][0-9a-fA-F])", lambda match: chr(int(match[1], 16)), message)
+    message = re.sub(r"[\x00-\x1f\x7f]", " ", message).strip()
+    if re.search(
+        r"\b(?:authorization|bearer|credentials?|password|passphrase|passcode|otp|cookie|token|secret|"
+        r"(?:api|client|private|secret|access)[ _-]?(?:key|secret)|(?:access|refresh|auth)[ _-]?token|"
+        r"(?:verification|one[ -]time)[ _-]?code)\b",
+        message, re.I,
+    ):
+        return "[redacted credential message]"
+    for pattern in (
+        r"\b(?:[a-z][a-z0-9+.-]*://|www\.)[^\s<>\"']+",
+        r"[a-z0-9.!#$%&'*+/=?^_\x60{|}~-]+@(?:[a-z0-9.-]+\.[a-z]{2,63}\b|\[[^\]\s]+\])",
+        r"\b(?:[a-z0-9-]+\.)+[a-z]{2,63}(?::\d{2,5}|/)[^\s<>\"']*",
+        r"\b(?:[a-z0-9-]+\.)+(?:com|org|net|io|dev|co|app|ro|invalid|example|local)\b",
+        r"(?<![\w-])[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}(?![\w-])",
+        r"\bsb_[a-z0-9_-]+",
+        r"(?<![\w+/=-])[a-z0-9+/_-]{24,}={0,2}(?![\w+/=-])",
+    ):
+        message = re.sub(pattern, "[redacted]", message, flags=re.I)
+    return message[:220]
+
+
+def crash_records(log, dropbox):
+    current = []
+    for raw in log.splitlines():
+        line = re.sub(r"^\d{2}-\d{2}\s+\d\d:\d\d:\d\d\.\d+\s+\d+\s+\d+\s+[VDIWEFAS]\s+[^:]+:\s*", "", raw).strip()
+        if dropbox:
+            boundary = re.fullmatch(r"={5,}", line) or re.match(
+                r"^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}.*\bdata_app_crash\b", line,
+            )
+        else:
+            boundary = line.startswith(("FATAL EXCEPTION:", "*** *** ***"))
+        if boundary and current:
+            yield current
+            current = []
+        current.append(line)
+    if current:
+        yield current
+
+
+def filtered_crashes(log, *, dropbox=False, include_messages=False):
+    process_pattern = re.compile(r"^(?:Process:|Cmdline:)\s*([\w.$:-]+)(?=[,\s]|$)|>>>\s+([\w.$:-]+)\s+<<<")
+    exception_pattern = re.compile(r"^(?:(Caused by|Suppressed):\s*)?([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)(?::\s*(.*))?$")
+    frame_pattern = re.compile(r"^at\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$<>][\w$<>]*)+)\(")
     evidence = []
-    for index, line in enumerate(lines):
-        if not re.search(rf"(?:Process: |Cmdline: |>>> ){re.escape(PACKAGE)}(?=[ ,<]|$)", line):
+    for record in crash_records(log, dropbox):
+        anchors = [(index, match[1] or match[2]) for index, line in enumerate(record)
+                   if (match := process_pattern.search(line))]
+        if {process for _, process in anchors} != {PACKAGE}:
             continue
-        block = []
-        for candidate in lines[index + 1:index + 36]:
-            if re.search(r"(?:Process: |Cmdline: |>>> )[a-zA-Z0-9_.]+", candidate) and PACKAGE not in candidate:
-                break
-            block.append(candidate)
-        detail = "\n".join(block)
-        java = re.search(r"\b((?:java|javax|android|com\.facebook)\.[\w.$]+(?:Exception|Error))\b", detail)
+        if not dropbox and not record[0].startswith(("FATAL EXCEPTION:", "*** *** ***")):
+            record = record[anchors[0][0]:]
+        exceptions = []
+        java_frames = []
+        for line in record:
+            exception = exception_pattern.fullmatch(line)
+            if exception and exception[2].endswith(("Exception", "Error", "Throwable")):
+                role = {"Caused by": "cause", "Suppressed": "suppressed"}.get(exception[1], "root")
+                item = {"role": role, "exceptionClass": exception[2]}
+                if include_messages and exception[3]:
+                    item["message"] = safe_exception_message(exception[3])
+                if len(exceptions) < 8:
+                    exceptions.append(item)
+            frame = frame_pattern.match(line)
+            if frame and frame[1] not in java_frames and len(java_frames) < 12:
+                java_frames.append(frame[1])
+        detail = "\n".join(record)
         signal = re.search(r"\bsignal (\d+) \((SIG[A-Z]+)\)", detail)
-        frames = re.findall(r"#[0-9]+\s+pc\s+[0-9a-fA-F]+\s+[^\s]*(lib[\w.-]+\.so)\b", detail)
-        entry = {"process": PACKAGE}
-        if java:
-            entry["exceptionClass"] = java[1]
+        native_frames = re.findall(r"#[0-9]+\s+pc\s+[0-9a-fA-F]+\s+[^\s]*(lib[\w.-]+\.so)\b", detail)
+        entry = {"process": PACKAGE, "source": "dropbox" if dropbox else "logcat"}
+        if exceptions:
+            entry["exceptions"] = exceptions
+        if java_frames:
+            entry["javaFrames"] = java_frames
         if signal:
             entry["signal"] = f"{signal[1]} {signal[2]}"
-        if frames:
-            entry["nativeLibraries"] = frames[:8]
+        if native_frames:
+            entry["nativeLibraries"] = native_frames[:8]
         if entry not in evidence:
             evidence.append(entry)
     return evidence[-3:]
@@ -270,7 +329,7 @@ class Device:
         self.require_fixture_screen(expected)
         self.save_screenshot(name)
 
-    def initial_diagnostics(self, launch_status, email_found):
+    def initial_diagnostics(self, launch_status, email_found, *, include_messages=False):
         # Call only before any credentials have been typed on the fresh install.
         def read(*command):
             try:
@@ -286,7 +345,20 @@ class Device:
         )) else "unavailable"
         exits = read("dumpsys", "activity", "exit-info", PACKAGE)
         reason = re.search(r"\breason=(\d+)\b", exits)
-        crashes = filtered_crashes(read("logcat", "-b", "crash", "-d", "-t", "200"))
+        crashes = filtered_crashes(
+            read("logcat", "-b", "crash", "-d", "-v", "raw", "-t", "300"),
+            include_messages=include_messages,
+        )
+        if not any(
+            item["role"] == "cause" or item["exceptionClass"] != "java.lang.RuntimeException"
+            for crash in crashes for item in crash.get("exceptions", [])
+        ):
+            fallback = filtered_crashes(
+                read("dumpsys", "dropbox", "--print", "data_app_crash"),
+                dropbox=True, include_messages=include_messages,
+            )
+            if fallback:
+                crashes = (crashes + fallback)[-3:]
 
         nodes = self.visible_hierarchy()
         safe_nodes = []
@@ -580,7 +652,7 @@ def main():
                 email_found = True
             except QAError:
                 email_found = False
-            device.initial_diagnostics(launch_status, email_found)
+            device.initial_diagnostics(launch_status, email_found, include_messages=True)
             result["status"] = "diagnostic"
             print("Initial Android diagnostics collected before credential input.")
         else:
