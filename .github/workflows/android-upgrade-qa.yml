@@ -235,6 +235,22 @@ jobs:
           "$adb" shell settings put global transition_animation_scale 0
           "$adb" shell settings put global animator_duration_scale 0
           "$adb" shell wm dismiss-keyguard
+          if [[ "$QA_NATIVE_SMOKE" == true ]]; then
+            qa_jdk="${JAVA_HOME_17_X64:-}"
+            probe_root=scripts/qa/native70-smoke/cache-probe
+            if [[ -z "$qa_jdk" || ! -x "$qa_jdk/bin/javac" ||
+                  "$("$adb" shell getprop ro.kernel.qemu | tr -d '\r')" != 1 ||
+                  "$("$adb" shell getprop ro.debuggable | tr -d '\r')" != 1 ]]; then
+              echo 'The read-only cache probe requires the disposable debuggable emulator and installed JDK17.' >&2
+              exit 1
+            fi
+            python3 "$probe_root/build.py" --sdk "$ANDROID_HOME" --jdk "$qa_jdk" \
+              >"$RUNNER_TEMP/qa-cache-probe-build.log" 2>&1
+            cp "$probe_root/out/build-evidence.json" "$QA_EVIDENCE/cache-probe-build.json"
+            "$adb" root >"$RUNNER_TEMP/qa-emulator-root.log" 2>&1
+            timeout 20 "$adb" wait-for-device
+            mode+=(--continue-historical --cache-probe-dex "$probe_root/out/dex/classes.dex")
+          fi
           python3 scripts/qa/android-native-upgrade.py "${mode[@]}" \
             --adb "$adb" --apk-dir "$QA_APK_DIR" --evidence "$QA_EVIDENCE"
           if [[ "$QA_NATIVE_SMOKE" == true ]]; then
@@ -242,6 +258,12 @@ jobs:
             smoke_root=scripts/qa/native70-smoke
             mkdir -p "$QA_EVIDENCE/native-smoke"
             smoke_failed=0
+            # Historical failures remain a failing overall job, even when candidate70 passes.
+            if python3 -c 'import json,os,sys; sys.exit(json.load(open(os.environ["QA_EVIDENCE"]+"/upgrade-results.json"))["status"] == "historical-failures")'; then
+              :
+            else
+              smoke_failed=1
+            fi
             qa_jdk="${JAVA_HOME_17_X64:-}"
             if [[ -n "$qa_jdk" && -x "$qa_jdk/bin/javac" &&
                   -f "$ANDROID_HOME/platforms/android-36/android.jar" ]] &&

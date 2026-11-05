@@ -61,6 +61,13 @@ FAILURE_LABELS = (HOME + RECIPES + PRODUCTION + ACCOUNT + MY_ACCOUNT + EDIT_LOCA
                       "Reîncearcă", "Retry", "Deconectare", "Sign out", "Loading", "Se încarcă",
                       "Fișă utilaj", "Equipment sheet", "Reîncarcă / sincronizează", "Reload / sync",
                   ))
+KNOWN_CACHE_ERRORS = (
+    "HACCP equipment cache is invalid. The saved data has been preserved.",
+    "Datele locale nu pot fi citite. Păstrează copia de siguranță a contului.",
+    "O înregistrare locală nu poate fi citită. Exportă datele contului înainte de recuperare.",
+    "Local data cannot be read. Keep your account backup.",
+    "A local record cannot be read. Export account data before recovery.",
+)
 SAFE_EQUIPMENT_TEXT = set(EQUIPMENT_REGISTRY + EQUIPMENT_FOLDER + ADD_EQUIPMENT + EQUIPMENT_SHEET + (
     "Înapoi", "Back", "Fișă utilaj", "Equipment sheet", "Reîncarcă / sincronizează", "Reload / sync",
     "Frigider carne • HACCP", "Frigider lactate • HACCP", "Linie caldă • HACCP",
@@ -100,6 +107,52 @@ def equipment_failure_screenshot_allowed(nodes, phase, focused_activity):
 
 class QAError(Exception):
     """A safe diagnostic with no raw command, auth input or device output."""
+
+
+class DeviceError(QAError):
+    """Transport failures are never accepted as historical application failures."""
+
+
+def candidate70_accepted(proof):
+    modes = {item.get("networkMode") for item in proof.get("checkpoints", [])
+             if item.get("versionCode") == "70" and item.get("signedInAfterRelaunch") is True
+             and item.get("ingredientsVerified") == 2 and item.get("equipmentBrand") == "QABrand"}
+    return (proof.get("status") in ("passed", "historical-failures") and proof.get("offlineUpgrade") is True
+            and proof.get("candidate70Status") == "passed" and {"offline", "online"} <= modes)
+
+
+def safe_cache_summary(summary):
+    if not isinstance(summary, dict) or set(summary) != {"readOnly", "owner", "databasePresent", "stores"}:
+        return False
+    if summary["readOnly"] is not True or summary["owner"] != "nativeC" or type(summary["databasePresent"]) is not bool:
+        return False
+    stores = summary["stores"]
+    expected = {"asset-profiles", "haccp-equipment", "maintenance-entries"}
+    if not isinstance(stores, list) or len(stores) != (3 if summary["databasePresent"] else 0):
+        return False
+    observed = set()
+    for store in stores:
+        if not isinstance(store, dict) or store.get("store") not in expected or store["store"] in observed:
+            return False
+        observed.add(store["store"])
+        for key, value in store.items():
+            if key == "store":
+                continue
+            if key in ("present", "allEntriesObjects", "allHaveStringIdAndName", "expectedBrandMatches", "expectedAvailable"):
+                if type(value) is not bool:
+                    return False
+            elif key in ("count", "expectedNameCount"):
+                if type(value) is not int or not 0 <= value <= 100000:
+                    return False
+            elif key in ("valueSha256", "expectedIdSha256", "expectedRecordSha256"):
+                if not isinstance(value, str) or not re.fullmatch(r"[a-f0-9]{64}", value):
+                    return False
+            elif key == "error":
+                if value not in ("duplicate-key", "value-too-large", "invalid-json-array", "read-failed"):
+                    return False
+            else:
+                return False
+    return True
 
 
 def require(condition, message):
@@ -222,8 +275,9 @@ class Device:
                 [*self.command, *arguments], capture_output=True, timeout=timeout, check=False,
             )
         except subprocess.TimeoutExpired:
-            raise QAError(f"Android timed out while attempting to {action}") from None
-        require(result.returncode == 0, f"Android failed to {action}")
+            raise DeviceError(f"Android timed out while attempting to {action}") from None
+        if result.returncode != 0:
+            raise DeviceError(f"Android failed to {action}")
         return result.stdout
 
     def visible_hierarchy(self):
@@ -496,7 +550,8 @@ class Device:
             json.dumps(diagnostic, indent=2) + "\n", encoding="utf-8",
         )
 
-    def failure_diagnostics(self):
+    def failure_diagnostics(self, suffix=None):
+        require(suffix is None or re.fullmatch(r"[a-z0-9-]{1,80}", suffix), "Invalid diagnostic suffix")
         """Retain fixed navigation labels only after credentials may have been entered."""
         def read(*command):
             try:
@@ -514,6 +569,9 @@ class Device:
                 continue
             label = next((value for value in FAILURE_LABELS if label_matches(node, (value,))), None)
             label = label or qa_fixture_marker(node.get("text", ""))
+            text = node.get("text", "").strip()
+            if text.removeprefix("Error: ") in KNOWN_CACHE_ERRORS:
+                label = text.removeprefix("Error: ")
             if label:
                 safe_nodes.append({"label": label, "class": cls if re.fullmatch(
                     r"android\.[\w.$]+", cls) else "other", "bounds": bounds(node)})
@@ -545,13 +603,42 @@ class Device:
             diagnostic["connectivityAtCapture"] = "unavailable"
         if equipment_failure_screenshot_allowed(nodes, self.phase, diagnostic["focusedAppActivity"]):
             try:
-                self.save_screenshot("failure-equipment")
+                self.save_screenshot("failure-equipment" + (f"-{suffix}" if suffix else ""))
                 diagnostic["screenshotCaptured"] = True
             except QAError:
                 pass
-        (self.evidence / "failure-diagnostics.json").write_text(
+        (self.evidence / (f"failure-diagnostics-{suffix}.json" if suffix else "failure-diagnostics.json")).write_text(
             json.dumps(diagnostic, indent=2) + "\n", encoding="utf-8",
         )
+
+    def capture_failure(self, suffix):
+        self.failure_diagnostics(suffix)
+        return f"failure-diagnostics-{suffix}.json"
+
+    def cache_probe(self, stage, equipment):
+        dex = getattr(self, "cache_probe_dex", None)
+        require(dex is not None, "The reviewed read-only cache probe is required")
+        require(re.fullmatch(r"[a-z0-9-]{1,80}", stage) and re.fullmatch(r"QA Oven \d+-\d+", equipment),
+                "Invalid synthetic cache probe request")
+        require(self.command[-1] == "emulator-5554", "Cache probes require the fixed QA emulator")
+        for prop, expected in (("ro.kernel.qemu", "1"), ("ro.build.version.sdk", "30"), ("ro.debuggable", "1")):
+            require(self.adb("verify the disposable QA emulator", "shell", "getprop", prop).decode().strip() == expected,
+                    "Read-only cache probe emulator gate failed")
+        require(self.adb("verify QA emulator root", "shell", "id", "-u").strip() == b"0",
+                "The read-only cache probe requires the disposable emulator root")
+        self.stop()
+        remote = "/data/local/tmp/manager247-cache-probe.dex"
+        self.adb("stage the reviewed read-only cache probe", "push", str(dex), remote)
+        output = self.adb("read the synthetic equipment cache summary", "shell",
+                          f"CLASSPATH={remote} app_process /system/bin ro.paradim.qa.CacheProbe {shlex.quote(equipment)}")
+        require(len(output) <= 12000, "The cache summary exceeded its safe output bound")
+        try:
+            summary = json.loads(output)
+        except (ValueError, UnicodeError):
+            raise QAError("The cache probe returned an invalid summary") from None
+        require(safe_cache_summary(summary), "The cache probe safe-output gate failed")
+        # Own-source helper emits only counts, hashes and fixed flags; never copy the database.
+        (self.evidence / f"cache-probe-{stage}.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
 
     @contextmanager
     def recording(self, filename, expected):
@@ -760,7 +847,12 @@ def relaunch(device):
     device.find(HOME, seconds=75)
 
 
-def run(device, apk_dir, verified, result, offline_upgrade=False):
+def run(device, apk_dir, verified, result, offline_upgrade=False, continue_historical=False):
+    versions = [entry["versionCode"] for entry in verified]
+    require(not continue_historical or (offline_upgrade and versions == [68, 69, 70]),
+            "Historical diagnostics require the offline APK68/69/70 chain")
+    if continue_historical:
+        result.update(historicalFailures=[], historicalObservations=[], candidate70Status="not-tested")
     email = os.environ.get("QA_STAGING_EMAIL", "")
     code = os.environ.get("QA_STAGING_OTP", "")
     require(re.fullmatch(r"[A-Za-z0-9._+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", email)
@@ -794,17 +886,48 @@ def run(device, apk_dir, verified, result, offline_upgrade=False):
     device.phase = "create-equipment"
     create_equipment(device, equipment, brand)
 
-    versions = [entry["versionCode"] for entry in verified]
     def checkpoint(version, phase, network_mode=None, record=False):
+        if version == 70 and network_mode:
+            result["candidate70Status"] = "failed"
         device.phase = f"verify-{phase}"
         before = device.wait_connectivity(network_mode == "online") if network_mode else None
         observed = device.package_info(version)
         require(all(observed[key] == original[key] for key in ("uid", "firstInstallTime")),
                 "Android package UID or first installation time changed across the update")
-        relaunch(device)
-        recording = assert_recipe(device, title, ingredients, phase, record=record)
-        relaunch(device)
-        assert_equipment(device, equipment, brand, phase)
+        historical = continue_historical and version in (68, 69) and network_mode == "offline"
+        component_results = {}
+        recording = None
+        for component in ("recipe", "equipment"):
+            device.phase = f"verify-{phase}"
+            started = time.monotonic()
+            try:
+                relaunch(device)
+                if component == "recipe":
+                    recording = assert_recipe(device, title, ingredients, phase, record=record)
+                else:
+                    assert_equipment(device, equipment, brand, phase)
+                component_results[component] = {"status": "passed", "seconds": round(time.monotonic() - started, 2)}
+            except QAError as error:
+                if not historical or isinstance(error, DeviceError):
+                    raise
+                failed = {"versionCode": str(version), "networkMode": "offline", "component": component,
+                          "status": "failed", "failure": str(error), "seconds": round(time.monotonic() - started, 2)}
+                # Network/identity checks remain outside the tolerated UI failures.
+                device.wait_connectivity(False)
+                try:
+                    failed["diagnostic"] = device.capture_failure(f"{phase}-{component}")
+                except Exception:
+                    failed["diagnosticUnavailable"] = True
+                result["historicalFailures"].append(failed)
+                component_results[component] = failed
+        after = device.wait_connectivity(network_mode == "online") if network_mode else None
+        if historical:
+            result["historicalObservations"].append({**observed, "networkMode": "offline", "components": component_results,
+                                                      "connectivityBefore": before, "connectivityAfter": after})
+            device.cache_probe(phase, equipment)
+        if any(item["status"] == "failed" for item in component_results.values()):
+            print(f"APK {version}: historical offline UI failure retained; candidate acceptance still mandatory.", flush=True)
+            return
         verified_checkpoint = {
             **observed,
             "signedInAfterRelaunch": True,
@@ -817,13 +940,20 @@ def run(device, apk_dir, verified, result, offline_upgrade=False):
             verified_checkpoint["screenRecording"] = recording
         if network_mode:
             verified_checkpoint.update(networkMode=network_mode, connectivityBefore=before,
-                                       connectivityAfter=device.wait_connectivity(network_mode == "online"))
+                                       connectivityAfter=after)
         result["checkpoints"].append(verified_checkpoint)
+        if continue_historical and version == 70:
+            device.cache_probe(phase, equipment)
         print(f"APK {version}: retained signed-in access, recipe and equipment fields verified.", flush=True)
 
     original_network = None
     try:
         if offline_upgrade:
+            if continue_historical:
+                device.phase = "warm-online-fixtures"
+                checkpoint(68, "apk68-online-warm", "online")
+                result["checkpoints"][-1]["networkMode"] = "online-warm"
+                device.cache_probe("apk68-online-warm", equipment)
             # Reading the existing location through its normal UI warms its persisted cache.
             device.phase = "warm-location-cache"
             relaunch(device)
@@ -859,6 +989,11 @@ def run(device, apk_dir, verified, result, offline_upgrade=False):
                     result["failureEvidenceBeforeConnectivityRestore"] = True
                 except Exception:
                     result["failureDiagnosticsCaptured"] = False
+                if continue_historical:
+                    try:
+                        device.cache_probe(f"{failed_phase}-failure", equipment)
+                    except Exception:
+                        result["failureCacheProbeUnavailable"] = True
             try:
                 device.phase = "restore-network"
                 restored = device.restore_connectivity(original_network)
@@ -872,6 +1007,8 @@ def run(device, apk_dir, verified, result, offline_upgrade=False):
                     device.phase = failed_phase
     if offline_upgrade:
         checkpoint(versions[-1], f"apk{versions[-1]}-online", "online")
+        if versions[-1] == 70:
+            result["candidate70Status"] = "passed"
 
 
 def main():
@@ -881,6 +1018,8 @@ def main():
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--diagnostics-only", action="store_true")
     parser.add_argument("--offline-upgrade", action="store_true")
+    parser.add_argument("--continue-historical", action="store_true")
+    parser.add_argument("--cache-probe-dex", type=Path)
     args = parser.parse_args()
     result = {"status": "failed", "checkpoints": []}
     device = None
@@ -899,6 +1038,9 @@ def main():
         artifact_set, evidence_class, native_abi = identities.pop()
         result.update(artifactSet=artifact_set, evidenceClass=evidence_class, nativeAbi=native_abi)
         device = Device(args.adb, os.environ.get("ANDROID_SERIAL", "emulator-5554"), args.evidence)
+        if args.continue_historical:
+            require(args.cache_probe_dex and args.cache_probe_dex.is_file(), "A reviewed cache probe dex is required")
+            device.cache_probe_dex = args.cache_probe_dex
         if args.diagnostics_only:
             device.install(args.apk_dir / "apk68.apk")
             result["installedBaseline"] = device.package_info(68)
@@ -915,8 +1057,9 @@ def main():
         else:
             if args.offline_upgrade:
                 result["offlineUpgrade"] = True
-            run(device, args.apk_dir, verified, result, offline_upgrade=args.offline_upgrade)
-            result["status"] = "passed"
+            run(device, args.apk_dir, verified, result, offline_upgrade=args.offline_upgrade,
+                continue_historical=args.continue_historical)
+            result["status"] = "historical-failures" if result.get("historicalFailures") else "passed"
     except QAError as error:
         result["failure"] = str(error)
     except Exception as error:

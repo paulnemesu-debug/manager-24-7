@@ -190,7 +190,10 @@ def main():
         verified = json.loads((args.base_evidence / "verified-apks.json").read_text())
         final = proof["checkpoints"][-1]
         identity = next(item for item in verified if item["versionCode"] == 70)
-        if not (proof["status"] == "passed" and proof["offlineUpgrade"] is True
+        spec = importlib.util.spec_from_file_location("base_native_qa", args.base_harness)
+        base = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(base)
+        if not (base.candidate70_accepted(proof)
                 and final["versionCode"] == "70" and final["networkMode"] == "online"
                 and identity["sha256"] == args.apk70_sha256.lower()
                 and identity["compiledStagingUrlVerified"] is True
@@ -200,9 +203,6 @@ def main():
         title = final["recipe"]
         if not re.fullmatch(r"QA Recipe \d+-\d+", title):
             raise RuntimeError("A synthetic recipe fixture is required")
-        spec = importlib.util.spec_from_file_location("base_native_qa", args.base_harness)
-        base = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(base)
         device = base.Device(args.adb, os.environ.get("ANDROID_SERIAL", "emulator-5554"), args.evidence)
         installed = device.package_info(70)
         base.require(all(installed[key] == final[key] for key in ("uid", "firstInstallTime")),
