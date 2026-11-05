@@ -25,6 +25,11 @@ on:
         type: boolean
         required: false
         default: false
+      foodcom_smoke:
+        description: After candidate70 acceptance, install the public Food.com catalogue and reopen a recipe offline
+        type: boolean
+        required: false
+        default: false
       apk70_sha256:
         description: Optional verified SHA-256 of the finished staging APK 70
         type: string
@@ -41,13 +46,14 @@ concurrency:
 jobs:
   upgrade:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: ${{ inputs.foodcom_smoke && 55 || 35 }}
     env:
       ANDROID_SERIAL: emulator-5554
       QA_DIAGNOSTICS_ONLY: ${{ inputs.diagnostics_only }}
       QA_ARTIFACT_SET: ${{ inputs.artifact_set || 'arm64-original' }}
       QA_OFFLINE_UPGRADE: ${{ inputs.offline_upgrade }}
       QA_NATIVE_SMOKE: ${{ inputs.native_smoke }}
+      QA_FOODCOM_SMOKE: ${{ inputs.foodcom_smoke }}
       APK70_SHA256: ${{ inputs.apk70_sha256 }}
 
     steps:
@@ -101,6 +107,10 @@ jobs:
           fi
           if [[ "$QA_DIAGNOSTICS_ONLY" == true && "$QA_OFFLINE_UPGRADE" == true ]]; then
             echo 'Offline upgrades require the authenticated QA mode.' >&2
+            exit 1
+          fi
+          if [[ "$QA_FOODCOM_SMOKE" == true && "$QA_NATIVE_SMOKE" != true ]]; then
+            echo 'Food.com smoke requires native smoke and its mandatory candidate70 acceptance.' >&2
             exit 1
           fi
           if [[ "$QA_NATIVE_SMOKE" == true ]] &&
@@ -291,6 +301,32 @@ jobs:
                 smoke_failed=1
               fi
             done
+            if [[ "$QA_FOODCOM_SMOKE" == true ]]; then
+              foodcom_dir="$QA_EVIDENCE/native-smoke/foodcom"
+              foodcom_helper="$smoke_root/native-foodcom-smoke.py"
+              foodcom_manifest="$smoke_root/public-foodcom-manifest.json"
+              helper_sha=523d57d61916a64846af05fb800c45ab2c0d85806ddf8ecd538cbe300891508b
+              manifest_sha=961e8c3af799c01e9d8cf1baad0d69747ca5469e60998776fbc77bdb8c3b0e74
+              if printf '%s  %s\n%s  %s\n' "$helper_sha" "$foodcom_helper" "$manifest_sha" "$foodcom_manifest" |
+                 sha256sum --check --status; then
+                base_harness_sha="$(git show "${GITHUB_SHA}:scripts/qa/android-native-upgrade.py" | sha256sum | cut -d ' ' -f 1)"
+                fixture_title="$(python3 -c 'import json,os; print(json.load(open(os.environ["QA_EVIDENCE"]+"/upgrade-results.json"))["checkpoints"][-1]["recipe"])')"
+                if ! python3 "$foodcom_helper" --execute --base-harness scripts/qa/android-native-upgrade.py \
+                    --base-harness-sha256 "$base_harness_sha" --base-evidence "$QA_EVIDENCE" \
+                    --manifest "$foodcom_manifest" --apk70-sha256 "$APK70_SHA256" \
+                    --fixture-title "$fixture_title" --adb "$adb" --serial "$ANDROID_SERIAL" --evidence "$foodcom_dir"; then
+                  smoke_failed=1
+                fi
+              else
+                echo 'The reviewed public Food.com helper or manifest checksum changed.' >&2
+                smoke_failed=1
+              fi
+              if [[ ! -f "$foodcom_dir/foodcom-native-result.json" ]]; then
+                mkdir -p "$foodcom_dir"
+                printf '%s\n' '{"status":"failed","scope":"optional-native-public-foodcom","failureStage":"preflight"}' \
+                  >"$foodcom_dir/foodcom-native-result.json"
+              fi
+            fi
             exit "$smoke_failed"
           fi
 
@@ -311,5 +347,10 @@ jobs:
             ${{ runner.temp }}/android-qa-evidence/native-smoke/*/native-*.png
             ${{ runner.temp }}/android-qa-evidence/native-smoke/pdf/native-recipe.pdf
             ${{ runner.temp }}/android-qa-evidence/native-smoke/gallery/qa-native-image.png
+            ${{ runner.temp }}/android-qa-evidence/native-smoke/foodcom/foodcom-native-result.json
+            ${{ runner.temp }}/android-qa-evidence/native-smoke/foodcom/foodcom-native-before-download.png
+            ${{ runner.temp }}/android-qa-evidence/native-smoke/foodcom/foodcom-native-installed.png
+            ${{ runner.temp }}/android-qa-evidence/native-smoke/foodcom/foodcom-offline-ready.png
+            ${{ runner.temp }}/android-qa-evidence/native-smoke/foodcom/foodcom-offline-detail-194.png
           if-no-files-found: ignore
           retention-days: 2

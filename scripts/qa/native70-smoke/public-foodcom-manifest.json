@@ -1,0 +1,485 @@
+{
+  "schemaVersion": 1,
+  "datasetVersion": 2,
+  "count": 522517,
+  "source": "https://www.kaggle.com/datasets/irkaal/foodcom-recipes-and-reviews",
+  "license": "CC0: Public Domain (as declared by Kaggle uploader)",
+  "sourceSha256": "9f591abe9f8d1c691bbc630b0431ec6613f09fabe93f1789af87a06484aae9fb",
+  "nutritionBasis": "per source serving; no serving mass in dataset",
+  "nutritionFields": [
+    "Calories",
+    "FatContent",
+    "SaturatedFatContent",
+    "CholesterolContent",
+    "SodiumContent",
+    "CarbohydrateContent",
+    "FiberContent",
+    "SugarContent",
+    "ProteinContent"
+  ],
+  "database": {
+    "file": "foodcom-v2.sqlite",
+    "bytes": 366206976,
+    "sha256": "4a186b2fa856d560f21bac0f368eff28799504717b69d408d33e96259c8cb81f",
+    "md5": "4b1a8ed1979f9ae311f533819b4989bf"
+  },
+  "download": {
+    "file": "foodcom-v2.sqlite.gz",
+    "bytes": 313918560,
+    "sha256": "44520299056363fe78cd3421e3fc9daaf4d092be0fc7653d21e6defb8d2ddac1",
+    "md5": "1e6c33ed5dbe869928cec53c19fed4ad"
+  },
+  "webChunks": [
+    {
+      "file": "foodcom-v2-part-000.jsonl.gz",
+      "bytes": 2153921,
+      "sha256": "9c67f390fe28937f015391f8f73110443573e0bec2ac76192044eb67337d4d40",
+      "md5": "125b7ab867945f99f60d8a794eaf9cf6",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-001.jsonl.gz",
+      "bytes": 2066840,
+      "sha256": "a4e0ad75a6caa7b0c96681cfbee6914066dda798656d3bb402cee9c7d2ecfa02",
+      "md5": "cfbaa6f4848515e19b8beafc124cd5c3",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-002.jsonl.gz",
+      "bytes": 2039738,
+      "sha256": "fb11d02dd0dd9938038d965a046bae5f4f171b75727107fdc746a72dddec0118",
+      "md5": "b2856ad7cd124e3936bc4ace90b87053",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-003.jsonl.gz",
+      "bytes": 1994751,
+      "sha256": "760f0776b4ddf4125cb8e22c32e4d1687281e4cd0a863dfa972a95325ead70d5",
+      "md5": "be5de610f008d425b845ccc93466ca7b",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-004.jsonl.gz",
+      "bytes": 2074412,
+      "sha256": "20c7ac18837583b1e33624f6fa62660420fc609f4dd512220b75774309ee02c8",
+      "md5": "785c851e72d0365af2f90cac56011c15",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-005.jsonl.gz",
+      "bytes": 2119229,
+      "sha256": "dda8bf89a3ad04d7cb386a763a8f23510f5594640aa7685a72bc6d0f75c23876",
+      "md5": "609c8340a5f29847493dc33a4a504419",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-006.jsonl.gz",
+      "bytes": 2160764,
+      "sha256": "cd99f5e6e5c221d0839642a2fb55fc44e036d2520ad0ea60493b4eea5344c2e0",
+      "md5": "b9d84c033c01788b019f949c1c53c45d",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-007.jsonl.gz",
+      "bytes": 2166802,
+      "sha256": "55c79aec9289383a072ffb08e677ea0e008b3e5aadf462a64444a7bcbbfb3cd8",
+      "md5": "961d7c8718fe7f15fa564e5502dba742",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-008.jsonl.gz",
+      "bytes": 2226270,
+      "sha256": "9ae5a1eb170fd500ddc7d6c95999b057ffcb9a2f5bfee8b3128c6934a76a8d9b",
+      "md5": "2297534b2294537a521a21333531ac68",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-009.jsonl.gz",
+      "bytes": 2215028,
+      "sha256": "0735e48360da33c42f9b953954a6474117d5cb8a1e7077898c7cca62775ad633",
+      "md5": "8439ae3f5d3c6f66fcce1be5ddaec324",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-010.jsonl.gz",
+      "bytes": 2290063,
+      "sha256": "0a5f6365522c1286c8a53b4bc876a8a75d6757dc1b155b8b7f0fba6e9410533e",
+      "md5": "7eb1ec30a8d6cc162444a21990024736",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-011.jsonl.gz",
+      "bytes": 2256379,
+      "sha256": "a8c3ced763395c62da96476615591c164309c627a857812f63f1f863817e3e55",
+      "md5": "b9e1745b83f6be43d0113c4a95397e9d",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-012.jsonl.gz",
+      "bytes": 2304617,
+      "sha256": "2034c655995d46a83a2cc4648354ee78f4b4e32d1c3db3a0e86cbb3495bf839c",
+      "md5": "4010a9c724462735a1261f9505772fc2",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-013.jsonl.gz",
+      "bytes": 2348062,
+      "sha256": "1fc732b12c18ec746fda1e78922c86a8538f8273b9d010102af9783918f9c9b0",
+      "md5": "d333edfabd6a24d80f4ea58d1013ee2e",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-014.jsonl.gz",
+      "bytes": 2187701,
+      "sha256": "af56773a4b88b51476e2b185e3080f4536da5248a99eab19dbcccbdff698e78d",
+      "md5": "31293c001ed01330f481416131df4377",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-015.jsonl.gz",
+      "bytes": 2292029,
+      "sha256": "6999d58be29dbeaef99d0d3b10c59f898607f43a7dad953edc2e7b0979bdbd8a",
+      "md5": "ad223c82a3fb866d1d56abbf20113212",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-016.jsonl.gz",
+      "bytes": 2409130,
+      "sha256": "433aafce7ea729574fd8677fa974d13e5057ddb3826684151e89b579c82df833",
+      "md5": "90f6b0f224707f4ce0ac609c1ba6f550",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-017.jsonl.gz",
+      "bytes": 2326700,
+      "sha256": "a4e28b2123aa9c21bdf61e4a15ec6c2e55442c8c7145470ac4384ebffcfbc690",
+      "md5": "5ed14d6612f68a3cf4f57c6e74b699bb",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-018.jsonl.gz",
+      "bytes": 2307770,
+      "sha256": "2f7fd6c74eb6e3e18afcaa0824c0f96917cfdb2826671dda081bc3f436faf811",
+      "md5": "2ca70980f425c4489f1008ff5ca22caa",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-019.jsonl.gz",
+      "bytes": 2307729,
+      "sha256": "2e65c72d60668fd13f44cf925f2d1c1800a05fc449d733682b28e90c05c41951",
+      "md5": "f283fbf63f120d3983a8cc7287821e8a",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-020.jsonl.gz",
+      "bytes": 2271718,
+      "sha256": "f6e66faff7625ce4de1480b8f14770fcb74d0f4ea1ee89d51c043e5e41f3e35d",
+      "md5": "46f210767ba0b53e2ec56a9acd3d942e",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-021.jsonl.gz",
+      "bytes": 2324518,
+      "sha256": "adb52c6208b17ad5174a490ebb718da3b6f4394b7d1215782f8cb12a5ab0ab7f",
+      "md5": "cff5ec8ea0c36b70303ebc245d2e2017",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-022.jsonl.gz",
+      "bytes": 2399349,
+      "sha256": "73c1b757cf6f22efb8a6abca44e132a4be1a298005da5f52db024c60ed3a4f15",
+      "md5": "8735275c2c4b1aebef5bbff735c3fd14",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-023.jsonl.gz",
+      "bytes": 2345636,
+      "sha256": "4f30f387bae089be675b05d22ae3eb046f3b6a696c5067a222db06247c9c55d6",
+      "md5": "cc5b0fd8ea4fee1816fa4d7b95d2be04",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-024.jsonl.gz",
+      "bytes": 2344951,
+      "sha256": "e0ff87bfcb0d66713e5989468cefd0b73fa555e3773a1f3486852208ee9f7908",
+      "md5": "5fdc654503ac2834da00b8b5d2a0e0ba",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-025.jsonl.gz",
+      "bytes": 2333351,
+      "sha256": "6f4aa03950d18c6a47130d747184798d2bc4a7bd9cb9583d0874ea8d11e677f6",
+      "md5": "732d6792ef8cde220a0fac5688b9f00d",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-026.jsonl.gz",
+      "bytes": 2312868,
+      "sha256": "374df46f8255c92b3c8fbbdd2cc457966dec0ecd3706119a0611c523a30ec4a8",
+      "md5": "c9c2669fa98cf41614a21fb0613c4c5b",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-027.jsonl.gz",
+      "bytes": 2341930,
+      "sha256": "153de9e6b7f0b431eea2405d785257d51cd0f4a453877feb3024cc6d4bc031de",
+      "md5": "8157bc68854338c79aa515b81374cbde",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-028.jsonl.gz",
+      "bytes": 2289824,
+      "sha256": "030f47ef928694841743fac11f84a72666a0d8fd34521d2e8dd636670e50c1aa",
+      "md5": "4b1277d31330fb2355094f5243470477",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-029.jsonl.gz",
+      "bytes": 2245111,
+      "sha256": "072596b082a8317d5ddf46814f74b436a534930c90468cf35737b99e00991a83",
+      "md5": "4611ac21c1369ea13aa2be1845f8e66b",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-030.jsonl.gz",
+      "bytes": 2314581,
+      "sha256": "9a7890c7bf6949003649ec6976bb1c1d8e5ce98a641239d218d013e84108fbd2",
+      "md5": "202098e475de79ae67ec967c3dcfc0ca",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-031.jsonl.gz",
+      "bytes": 2376569,
+      "sha256": "845e7edec9874019298674287b7a6ff9abe05a7cc76da4031db63aeb83212929",
+      "md5": "57b46e45119954b536e71635589a6100",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-032.jsonl.gz",
+      "bytes": 2301919,
+      "sha256": "48e0b1bc4f7afbadeb61bfe3d126bea5f0a3a5fb3f0039af9cc742aa93e69c48",
+      "md5": "aad88f2530aef09d466b1934420ec293",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-033.jsonl.gz",
+      "bytes": 2348333,
+      "sha256": "2c6b6361ed81131f0692287f84e9b0fc31c34853e5c27e37063dc50c8dd924bc",
+      "md5": "0b79832fc95a4af1ce3626fccaf56368",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-034.jsonl.gz",
+      "bytes": 2272166,
+      "sha256": "b0beed44d3b5a30b3de44e0db2c5135335984f6a15f5794352c83c6f04f463f0",
+      "md5": "a007dc88afb44ae7649208e06e1933b5",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-035.jsonl.gz",
+      "bytes": 2298647,
+      "sha256": "cc62c65e3689a5cccafcb0b2ceacd5902584f00ed69512828e0bc68d9b19f4ab",
+      "md5": "a64912d9d7affb0ff337f09b160ce3ff",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-036.jsonl.gz",
+      "bytes": 2314273,
+      "sha256": "3c3cbe52d153e61f4a68581be77e02e9de1175fab8eac64434dcb9640350c42e",
+      "md5": "7cb647820dd568570cc3a28ba91d6200",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-037.jsonl.gz",
+      "bytes": 2348166,
+      "sha256": "fa79420dd2ed3b1513e1c2de9d6604fb3cac7ce4dd8cfb54e0c2ead427f4330e",
+      "md5": "41308adc4ec37057935f1381910ce483",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-038.jsonl.gz",
+      "bytes": 2364449,
+      "sha256": "38923fc1fe854dc037c2a911e694d3d84f0d01418002c3f85e2533dbbfd58550",
+      "md5": "52e9161c02b9123455b7dbbd3cc87ecf",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-039.jsonl.gz",
+      "bytes": 2395174,
+      "sha256": "04a0b5172790c4ebfcbd64a8c54a50dde7dec5cf3925fcc54422642b8e826ba0",
+      "md5": "d9ac35bc1827ccb93a7eccf815e53a5f",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-040.jsonl.gz",
+      "bytes": 2386104,
+      "sha256": "128fb963df8234cff6061b65f9623fdf0bb6fd6094b300d3ea1aa437333f3414",
+      "md5": "e02a4f357337655ffd53bd951e519ba0",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-041.jsonl.gz",
+      "bytes": 2424853,
+      "sha256": "328f7085ccb6699f1d4f4a798ed9bf5d351e1bae12c59ef236a6925b2a9c53d2",
+      "md5": "70dcac760ba0c05b3fd9c97bdcfaf8a7",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-042.jsonl.gz",
+      "bytes": 2411739,
+      "sha256": "e8f5d5570d26bb31888a05921fc453e2f10d7b0f0f6ac3305ae05473ef3570c8",
+      "md5": "c2f3d780ad268ff9a48e0c0c3870d7e5",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-043.jsonl.gz",
+      "bytes": 2474514,
+      "sha256": "56d8a041f598ab849d9df9b1a119d0f9c1a5c8189e1d1408416c5289823f46e9",
+      "md5": "bf1c5858323529ea5425f352bc584f13",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-044.jsonl.gz",
+      "bytes": 2405267,
+      "sha256": "1c7fd2b03005848903ef038ab75aefd7f67c4276d29fa027a7d803c2f4e62a6d",
+      "md5": "b8aaf8aa45b5431ea9526a4ff7d0a620",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-045.jsonl.gz",
+      "bytes": 2496288,
+      "sha256": "a8536c63d750afb98b92c39e9068ddb420654391a1e6a54df20e646797f40a7f",
+      "md5": "a07642ee75058bdbfe8f2061a13539fe",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-046.jsonl.gz",
+      "bytes": 2452631,
+      "sha256": "e2d5f9cb145943007e1731a808f598fc9fbac7a8ee2efa78a180992a26c50313",
+      "md5": "85791ce6ced0c15bbec27dbd73545b28",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-047.jsonl.gz",
+      "bytes": 2561095,
+      "sha256": "043fb52cf21ce6186def896c104d2933ae4c1b4c29bcd39bc0a0d91a2a036590",
+      "md5": "ddcb0fea1893dd8d3fe177e4423b1867",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-048.jsonl.gz",
+      "bytes": 2486864,
+      "sha256": "9133637d0d81604d4cb67dff34168fa0acbff2c3ed926141102408b3de063ff7",
+      "md5": "341aa1f7e41683f649ee0a04da38f495",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-049.jsonl.gz",
+      "bytes": 2497391,
+      "sha256": "ae280f1b5d9fe32ae30e2317df7eef40c5fa7954a687be56dc34090bef232e24",
+      "md5": "2cee4f3f4bbbfc7f9abaa07da13c769d",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-050.jsonl.gz",
+      "bytes": 2452553,
+      "sha256": "41e04071f6334395bdd4dca4797e522ea9e6a577b1c959966229523152670128",
+      "md5": "70ef64472374cb75b73b8c4e62ec37c4",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-051.jsonl.gz",
+      "bytes": 2537825,
+      "sha256": "ce20b14204c4fbeca62375bb46d7be0ed9cbb704525075d4e977c6619b857650",
+      "md5": "b3fa4788483afc41e0555ce2ba19fa89",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-052.jsonl.gz",
+      "bytes": 2565324,
+      "sha256": "e228c8e229fac67709137a8f29742230e1c2d2d59b7ea78f73f46ec52b17ecd3",
+      "md5": "73ea58992cd4760009a1844cd3fbdc56",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-053.jsonl.gz",
+      "bytes": 2476823,
+      "sha256": "e9fa95798228ac52bcd0c3603f551a55172ed3f0187d41b9875d1a82605e5413",
+      "md5": "484cd0378f2e33ebb7e25ff3f2769c95",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-054.jsonl.gz",
+      "bytes": 2480961,
+      "sha256": "ac259c590cd8d869b980784826c5fd2922bb31591c529ca6f3c7c46c173a7f57",
+      "md5": "0c292282c69ccadbaa5d70910f52f262",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-055.jsonl.gz",
+      "bytes": 2542234,
+      "sha256": "702f220352276b1cbf5e3b69b6d2cda7a8cec4524e937482a6adea067dc313dd",
+      "md5": "ba91eb69a0e5a89e8f540d792d253c72",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-056.jsonl.gz",
+      "bytes": 2564046,
+      "sha256": "a17f03b80ae572b24ddc9949b91efeb93b65c9c114fff30e251541cfe9551653",
+      "md5": "8d3a28b38678bd79a5867218020a6f2d",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-057.jsonl.gz",
+      "bytes": 2654231,
+      "sha256": "adb189234a17af2e7cf873dd4f2511d5eab050a5db8c5d5c8c180ce0ca4ed198",
+      "md5": "e7bc65106de59f2b294ad6a2590703d0",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-058.jsonl.gz",
+      "bytes": 2624085,
+      "sha256": "a7ee491b76fa7cb8de551f6122efc8768e8f4f70fe6f52d1c9e07f5003dfb472",
+      "md5": "9125535a2b3fbe550c1109d246928236",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-059.jsonl.gz",
+      "bytes": 2590351,
+      "sha256": "62c5242472a2bccb3222002c5fb18cdb990f8ebdebda20ab75aaf6079d403e75",
+      "md5": "7d63a4f4aaef4c6855ab4b0126f19bce",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-060.jsonl.gz",
+      "bytes": 2532909,
+      "sha256": "83559c8e72831d48df09864a212f9cbacd09ef3885f885d0e741affed1e8f708",
+      "md5": "8bdd2529505871a16f347907c45b6375",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-061.jsonl.gz",
+      "bytes": 2588979,
+      "sha256": "43165b5077aa3815692993688db471f911ec8e30565cca2154a0a6ed7b526c66",
+      "md5": "f6ecb652a94ff42cbc85743757c6fe79",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-062.jsonl.gz",
+      "bytes": 2780473,
+      "sha256": "d6503dc96c80b642f53ab626542cbd5796d2d5d13249f2f1620d98361ff35268",
+      "md5": "1725c2228a9bc04f2aa2bf570bdabc31",
+      "rows": 8192
+    },
+    {
+      "file": "foodcom-v2-part-063.jsonl.gz",
+      "bytes": 2360005,
+      "sha256": "d3ced42b42e0ded128445cbe745dc7416c4f2cd2eb3371fb7f6ba5d7057cb8a4",
+      "md5": "9dc4038c80a7d5ea979a386e390a1011",
+      "rows": 6421
+    }
+  ],
+  "rawPayloadBytes": 498439972,
+  "individualGzipBytes": 288908931,
+  "buildSeconds": 239.3
+}
