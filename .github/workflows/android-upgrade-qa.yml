@@ -294,6 +294,12 @@ jobs:
               echo 'Native PDF smoke requires the installed JDK 17 and Android platform 36.' >&2
               smoke_failed=1
             fi
+            supplemental_sha=c070ad9656a67aec34ae56da10f48a3a5bf1c70280a1455e5a04c575171b20ea
+            if ! printf '%s  %s\n' "$supplemental_sha" "$smoke_root/supplemental-native70.py" |
+                sha256sum --check --status; then
+              echo 'The reviewed supplemental native helper checksum changed.' >&2
+              exit 1
+            fi
             for smoke_mode in pdf gallery camera; do
               if ! python3 "$smoke_root/supplemental-native70.py" --execute --mode "$smoke_mode" \
                   --base-harness scripts/qa/android-native-upgrade.py --base-evidence "$QA_EVIDENCE" \
@@ -305,7 +311,7 @@ jobs:
               foodcom_dir="$QA_EVIDENCE/native-smoke/foodcom"
               foodcom_helper="$smoke_root/native-foodcom-smoke.py"
               foodcom_manifest="$smoke_root/public-foodcom-manifest.json"
-              helper_sha=523d57d61916a64846af05fb800c45ab2c0d85806ddf8ecd538cbe300891508b
+              helper_sha=d8b894827b224d6f76294ddb3d4213191950c628ae6f9a25fa6300da851e3147
               manifest_sha=961e8c3af799c01e9d8cf1baad0d69747ca5469e60998776fbc77bdb8c3b0e74
               if printf '%s  %s\n%s  %s\n' "$helper_sha" "$foodcom_helper" "$manifest_sha" "$foodcom_manifest" |
                  sha256sum --check --status; then
@@ -352,5 +358,6 @@ jobs:
             ${{ runner.temp }}/android-qa-evidence/native-smoke/foodcom/foodcom-native-installed.png
             ${{ runner.temp }}/android-qa-evidence/native-smoke/foodcom/foodcom-offline-ready.png
             ${{ runner.temp }}/android-qa-evidence/native-smoke/foodcom/foodcom-offline-detail-194.png
+            ${{ runner.temp }}/android-qa-evidence/native-smoke/foodcom/foodcom-native-failure.png
           if-no-files-found: ignore
           retention-days: 2

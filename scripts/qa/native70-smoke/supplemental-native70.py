@@ -21,6 +21,87 @@ GALLERY = ("Alege din galerie", "Choose from gallery")
 CAMERA = ("Fă fotografie", "Take photo")
 PHOTO = ("Recipe photo",)
 IMAGE_NAME = "qa-native-image.png"
+SYSTEM_PACKAGES = frozenset((SINK, "android", "com.android.intentresolver", "com.google.android.intentresolver",
+    "com.android.documentsui", "com.google.android.documentsui", "com.android.providers.media",
+    "com.android.providers.media.module", "com.google.android.providers.media.module",
+    "com.android.permissioncontroller", "com.google.android.permissioncontroller"))
+SYSTEM_TEXT = frozenset((SHARE_TARGET, "QA PDF saved", "QA PDF sink ready", "Reopen saved PDF",
+    "QA PDF saved and reopened", "QA PDF rendered page 1", "Share", "Share with", "Sharing",
+    "Complete action using", "Just once", "Always", "Files", "Recent", "Images", "Browse",
+    "Downloads", "Documents", "Photos", "Open from", "Select", "Allow", "Deny", "Don't allow",
+    "While using the app", IMAGE_NAME))
+CONTROL_NAMES = frozenset(("QA PDF Save sharesheet target", "native PDF receiver saved confirmation",
+    "reopen saved PDF button", "Android PdfRenderer reopen confirmation", "permission or picker control",
+    "synthetic gallery image qa-native-image.png", "emulated camera shutter",
+    "camera result acceptance", "Expo image crop acceptance"))
+
+
+class NativeControlError(RuntimeError):
+    def __init__(self, description):
+        self.control = description if description in CONTROL_NAMES else "unclassified-native-control"
+        super().__init__("A reviewed native control was not found")
+
+
+def system_failure_evidence(device, title):
+    """Bounded known-system metadata only. Unknown text or input prevents screenshots."""
+    result = {"screenshotCaptured": False, "controls": [], "focusedActivity": "unavailable"}
+    if device.phase not in ("supplemental-pdf-share", "supplemental-pdf-reopen", "supplemental-gallery-picker"):
+        return result
+    try:
+        activity = device.adb("inspect known native UI focus", "shell", "dumpsys", "activity", "activities").decode(errors="replace")
+        for line in activity.splitlines():
+            if "ResumedActivity" not in line:
+                continue
+            match = re.search(r"\s([A-Za-z][\w.]*)/([A-Za-z0-9_.$]+)", line)
+            if match and match[1] in SYSTEM_PACKAGES:
+                result["focusedActivity"] = f"{match[1]}/{match[2]}"
+                break
+    except Exception:
+        pass
+    nodes = device.visible_hierarchy()
+    filename = re.sub(r"[^a-zA-Z0-9]+", "-", title).strip("-").lower() + "-food-cost.pdf"
+    def safe_text(value):
+        return (value in SYSTEM_TEXT or value == filename or value == "Saved file: " + filename
+                or bool(re.fullmatch(r"(?:Bytes|Pages): \d{1,8}|SHA256: [a-f0-9]{64}|QA PDF failed: (?:SecurityException|IOException|FileNotFoundException|IllegalStateException|IllegalArgumentException)", value)))
+    counts = {}
+    image_safe = result["focusedActivity"] != "unavailable"
+    for node in nodes:
+        package = node.get("package", "")
+        if package == "com.android.systemui":
+            chrome = (node.get("text", "").strip(), node.get("content-desc", "").strip())
+            if any(value and value not in ("Back", "Home", "Overview", "Recent apps")
+                   and not re.fullmatch(r"\d{1,2}:\d{2}(?:\s*[AP]M)?", value) for value in chrome):
+                image_safe = False
+            continue  # Never retain notification text or capture uncertain chrome.
+        values = [value.strip() for value in (node.get("text", ""), node.get("content-desc", "")) if value.strip()]
+        if package not in SYSTEM_PACKAGES:
+            image_safe = False
+            continue
+        counts[package] = counts.get(package, 0) + 1
+        cls = node.get("class", "")
+        if cls == "android.widget.EditText" or any(not safe_text(value) for value in values):
+            image_safe = False
+        coordinates = [int(value) for value in re.findall(r"\d+", node.get("bounds", ""))]
+        item = {"package": package, "class": cls if re.fullmatch(r"(?:android|androidx)\.[\w.$]+", cls) else "other"}
+        if len(coordinates) == 4:
+            item["bounds"] = coordinates
+        resource = node.get("resource-id", "")
+        if re.fullmatch(r"[a-z][a-z0-9_.]+:id/[A-Za-z_][A-Za-z0-9_]{0,79}", resource):
+            item["resourceId"] = resource
+        if cls != "android.widget.EditText":
+            label = next((value for value in values if safe_text(value)), None)
+            if label is not None:
+                item["label"] = label
+        if len(result["controls"]) < 100:
+            result["controls"].append(item)
+    result["knownPackageNodeCounts"] = counts
+    result["unknownPackageNodeCount"] = sum(1 for node in nodes if node.get("package", "") not in SYSTEM_PACKAGES | {"com.android.systemui"})
+    if image_safe and counts:
+        # Refuse a changed screen rather than capture a new unreviewed surface.
+        if [node.attrib for node in device.visible_hierarchy()] == [node.attrib for node in nodes]:
+            device.save_screenshot("native-system-failure")
+            result["screenshotCaptured"] = True
+    return result
 
 
 def system_find(device, choose, description, seconds=45):
@@ -30,7 +111,7 @@ def system_find(device, choose, description, seconds=45):
         if match is not None:
             return match
         time.sleep(0.5)
-    raise RuntimeError(f"Missing reviewed native control: {description}")
+    raise NativeControlError(description)
 
 
 def select(nodes, labels=(), ids=(), packages=()):
@@ -89,13 +170,13 @@ def pdf_smoke(device, base, title, evidence):
             "sha256": sha, "bytes": len(content), "file": saved.name, "visualPageReviewRequired": True}
 
 
-def permission_or_control(device, labels=(), ids=(), packages=()):
+def permission_or_control(device, labels=(), ids=(), packages=(), description="permission or picker control"):
     def choose(nodes):
         permission = select(nodes, ids=("permission_allow_foreground_only_button", "permission_allow_button"),
                             packages=("com.android.permissioncontroller", "com.google.android.permissioncontroller"))
         return permission if permission is not None else select(nodes, labels=labels, ids=ids, packages=packages)
     for _ in range(3):
-        control = system_find(device, choose, "permission or picker control")
+        control = system_find(device, choose, description)
         if control.get("package", "").endswith("permissioncontroller"):
             device.tap(control)
         else:
@@ -127,7 +208,7 @@ def photo_smoke(device, base, title, evidence, mode):
     if mode == "gallery":
         fixture_sha = seed_image(device, evidence)
         device.click(GALLERY, scroll="both")
-        picked = permission_or_control(device, labels=(IMAGE_NAME,),
+        picked = permission_or_control(device, labels=(IMAGE_NAME,), description="synthetic gallery image qa-native-image.png",
             packages=("com.android.documentsui", "com.google.android.documentsui", "com.android.providers.media.module", "com.google.android.providers.media.module"))
         device.tap(picked)
     else:
@@ -136,7 +217,7 @@ def photo_smoke(device, base, title, evidence, mode):
         base.require(count and int(count[1]) > 0, "Camera smoke requires emulator -camera-back emulated")
         fixture_sha = None
         device.click(CAMERA, scroll="both")
-        shutter = permission_or_control(device, labels=("Shutter", "Take photo"), ids=("shutter_button",),
+        shutter = permission_or_control(device, labels=("Shutter", "Take photo"), ids=("shutter_button",), description="emulated camera shutter",
             packages=("com.android.camera2", "com.google.android.GoogleCamera"))
         device.tap(shutter)
         accepted = system_find(device, lambda nodes: select(nodes, labels=("Done", "Use photo"),
@@ -214,8 +295,14 @@ def main():
     except Exception as error:
         result["failureClass"] = type(error).__name__
         result["failureStage"] = device.phase if device is not None else "preflight"
+        if isinstance(error, NativeControlError):
+            result["failureControl"] = error.control
         # Never retain native intents, URLs, editable fields or raw error output.
         if device is not None:
+            try:
+                result["systemFailure"] = system_failure_evidence(device, title)
+            except Exception:
+                result["systemDiagnosticUnavailable"] = True
             try:
                 device.failure_diagnostics()
             except Exception:

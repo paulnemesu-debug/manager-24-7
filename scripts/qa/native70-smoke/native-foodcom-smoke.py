@@ -68,19 +68,60 @@ def find(device, labels, deadline, *, editable=False, scroll="both", seconds=40)
 
 def public_screenshot(device, filename):
     # The catalogue contains public reference data. No other app screen is captured.
-    require(matching(device.hierarchy(), TITLE), "Public catalogue header missing before screenshot")
+    require(matching(device.hierarchy(), TITLE) is not None, "Public catalogue header missing before screenshot")
     device.save_screenshot(filename)
 
 
-def open_catalogue(device, base, deadline):
+def open_catalogue(device, base, deadline, observations=None):
     remaining(deadline, 80)
-    device.phase = "foodcom-normal-ui-navigation"
-    base.relaunch(device)
-    device.tab(base.RECIPES)
-    device.folder(base.RECIPES)
-    device.click(LIBRARY, scroll="both", seconds=min(40, remaining(deadline)))
-    device.click(OPEN_CATALOGUE, scroll="both", seconds=min(40, remaining(deadline)))
-    find(device, TITLE, deadline, scroll=None)
+    actions = (
+        ("relaunch", lambda: base.relaunch(device)),
+        ("tab-recipes", lambda: device.tab(base.RECIPES)),
+        ("folder-recipes", lambda: device.folder(base.RECIPES)),
+        ("open-library", lambda: device.click(LIBRARY, scroll="both", seconds=min(40, remaining(deadline)))),
+        ("open-catalogue", lambda: device.click(OPEN_CATALOGUE, scroll="both", seconds=min(40, remaining(deadline)))),
+        ("confirm-catalogue", lambda: find(device, TITLE, deadline, scroll=None)),
+    )
+    for step, action in actions:
+        device.phase = "foodcom-nav-" + step
+        started = time.monotonic()
+        action()
+        if observations is not None:
+            observations.append({"step":step, "seconds":round(time.monotonic()-started, 3)})
+
+
+def failure_navigation_evidence(device, fixture_title, fixture_verified):
+    """Keep fixed navigation labels only; images require the verified synthetic/public screen."""
+    nodes = device.hierarchy()
+    labels = LIBRARY + OPEN_CATALOGUE + TITLE + START + READY + SUBTITLE + ("Recipes", "Rețete", "My recipes", "Rețetele mele", "Retry", "Reîncearcă")
+    safe = []
+    for node in nodes:
+        if node.get("class") == "android.widget.EditText":
+            continue
+        value = next((value for value in (node.get("text", "").strip(), node.get("content-desc", "").strip())
+                      if value in labels or value == fixture_title), None)
+        if value is not None:
+            coordinates = [int(value) for value in re.findall(r"\d+", node.get("bounds", ""))]
+            safe.append({"label":value, "bounds":coordinates if len(coordinates)==4 else []})
+    result = {"visibleNavigation":safe[:50], "visibleAppNodeCount":len(nodes), "screenshotCaptured":False}
+    auth_labels = ("Email address", "Adresa de email", "Code from email", "Cod din email", "I already have a code", "Am deja un cod", "Send access code", "Trimite codul de acces")
+    values = [value.strip() for node in nodes for value in (node.get("text", ""),node.get("content-desc", "")) if value.strip()]
+    sensitive = any(value in auth_labels or re.search(r"@|https?://|\bBearer\b|eyJ[a-zA-Z0-9_-]+|sb_(?:secret|publishable)_",value) for value in values)
+    unknown_input = any(node.get("class")=="android.widget.EditText" and node.get("text", "").strip() not in ("",fixture_title,"chicken soup") for node in nodes)
+    marker = matching(nodes,(fixture_title,)+TITLE) is not None
+    if fixture_verified and marker and not sensitive and not unknown_input:
+        focus = device.adb("verify synthetic catalogue UI focus", "shell", "dumpsys", "activity", "activities").decode(errors="replace")
+        own_focus = any("ResumedActivity" in line and f"{PACKAGE}/.MainActivity" in line for line in focus.splitlines())
+        visible = device.visible_hierarchy()
+        foreign = any(node.get("package", "") not in (PACKAGE,"com.android.systemui") for node in visible)
+        chrome_safe = all(not value.strip() or value.strip() in ("Back","Home","Overview","Recent apps")
+                          or re.fullmatch(r"\d{1,2}:\d{2}(?:\s*[AP]M)?",value.strip())
+                          for node in visible if node.get("package")=="com.android.systemui"
+                          for value in (node.get("text",""),node.get("content-desc","")))
+        if own_focus and not foreign and chrome_safe and [node.attrib for node in device.hierarchy()]==[node.attrib for node in nodes]:
+            device.save_screenshot("foodcom-native-failure")
+            result["screenshotCaptured"] = True
+    return result
 
 
 def read_progress(nodes):
@@ -100,7 +141,7 @@ def wait_installed(device, deadline, observations):
         except Exception:
             # Busy native install may temporarily prevent a hierarchy dump.
             nodes = []
-        if matching(nodes, READY):
+        if matching(nodes, READY) is not None:
             return
         for category, labels in SAFE_ERRORS:
             if any(node.get("text", "").startswith(labels) for node in nodes):
@@ -128,7 +169,7 @@ def verify_detail_offline(device, base, deadline, result):
         device.adb("disable isolated emulator Wi-Fi", "shell", "svc", "wifi", "disable")
         device.adb("disable isolated emulator mobile data", "shell", "svc", "data", "disable")
         result["network"]["offline"] = device.wait_connectivity(False, seconds=min(30, remaining(deadline)))
-        open_catalogue(device, base, deadline)  # force-stop/cold start, no data clearing
+        open_catalogue(device, base, deadline, result.setdefault("navigationCheckpoints", []))  # cold start, no data clearing
         device.phase = "foodcom-offline-readiness"
         find(device, READY, deadline)
         find(device, SUBTITLE, deadline)
@@ -226,6 +267,7 @@ def main():
               "executed":True, "expectedCount":FOODCOM_COUNT,
               "manifestSha256":sha(args.manifest), "baseHarnessSha256":sha(args.base_harness)}
     device = None
+    fixture_verified = False
     try:
         device = base.Device(args.adb, args.serial, args.evidence)
         device.phase = "foodcom-installed-apk-preflight"
@@ -245,9 +287,12 @@ def main():
         device.click(base.recipe_card(args.fixture_title), scroll="both")
         require(find(device, base.RECIPE_TITLE, deadline, editable=True).get("text") == args.fixture_title,
                 "The current normal UI session does not match the accepted fixture")
-        open_catalogue(device, base, deadline)
-        require(not matching(device.hierarchy(), READY), "Catalogue is already installed; fresh-download coverage would be absent")
+        fixture_verified = True
+        open_catalogue(device, base, deadline, result.setdefault("navigationCheckpoints", []))
+        device.phase = "foodcom-fresh-install-check"
+        require(matching(device.hierarchy(), READY) is None, "Catalogue is already installed; fresh-download coverage would be absent")
         find(device, START, deadline)
+        device.phase = "foodcom-before-download-evidence"
         public_screenshot(device, "foodcom-native-before-download")
         device.click(START, scroll="both", seconds=min(40, remaining(deadline)))
         device.phase = "foodcom-download-install"
@@ -256,6 +301,7 @@ def main():
         wait_installed(device, min(time.monotonic()+INSTALL_SECONDS, deadline-140), progress)
         result["installationProgress"] = progress
         find(device, SUBTITLE, deadline)
+        device.phase = "foodcom-installed-evidence"
         public_screenshot(device, "foodcom-native-installed")
         result["install"] = {"normalUiInstallStarted":True, "readyVisible":True,
             "displayedReferenceCount":FOODCOM_COUNT,
@@ -269,6 +315,11 @@ def main():
         # Retain only stage/class, never arbitrary exception text, intents or hierarchy dumps.
         result["failureClass"] = type(error).__name__
         result["failureStage"] = device.phase if device else "preflight"
+        if device is not None:
+            try:
+                result["failureNavigation"] = failure_navigation_evidence(device,args.fixture_title,fixture_verified)
+            except Exception:
+                result["failureDiagnosticUnavailable"] = True
     finally:
         result["elapsedSeconds"] = round(time.monotonic()-started, 3)
         result["within20MinuteBudget"] = result["elapsedSeconds"] <= TOTAL_SECONDS
