@@ -20,6 +20,11 @@ on:
         type: boolean
         required: false
         default: false
+      native_smoke:
+        description: After offline acceptance, test native PDF save/reopen and synthetic gallery/camera
+        type: boolean
+        required: false
+        default: false
       apk70_sha256:
         description: Optional verified SHA-256 of the finished staging APK 70
         type: string
@@ -36,12 +41,13 @@ concurrency:
 jobs:
   upgrade:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
     env:
       ANDROID_SERIAL: emulator-5554
       QA_DIAGNOSTICS_ONLY: ${{ inputs.diagnostics_only }}
       QA_ARTIFACT_SET: ${{ inputs.artifact_set || 'arm64-original' }}
       QA_OFFLINE_UPGRADE: ${{ inputs.offline_upgrade }}
+      QA_NATIVE_SMOKE: ${{ inputs.native_smoke }}
       APK70_SHA256: ${{ inputs.apk70_sha256 }}
 
     steps:
@@ -97,6 +103,12 @@ jobs:
             echo 'Offline upgrades require the authenticated QA mode.' >&2
             exit 1
           fi
+          if [[ "$QA_NATIVE_SMOKE" == true ]] &&
+             [[ "$QA_OFFLINE_UPGRADE" != true || "$QA_DIAGNOSTICS_ONLY" == true ||
+                "$QA_ARTIFACT_SET" != x86_64-source-matched || -z "$APK70_SHA256" ]]; then
+            echo 'Native smoke requires the authenticated offline x86_64 APK 70 chain.' >&2
+            exit 1
+          fi
           mkdir -p "$QA_APK_DIR" "$QA_EVIDENCE"
           download_apk() {
             local version="$1" url="$2"
@@ -150,6 +162,9 @@ jobs:
             --apk-dir "$QA_APK_DIR" --aapt "$build_tools/aapt" --apksigner "$build_tools/apksigner" \
             --artifact-set "$QA_ARTIFACT_SET" \
             --apk70-sha256 "$APK70_SHA256" --output "$QA_EVIDENCE/verified-apks.json"
+          if [[ "$QA_NATIVE_SMOKE" == true ]]; then
+            python3 -c 'import ast, pathlib; [ast.parse(pathlib.Path(p).read_text()) for p in ("scripts/qa/native70-smoke/supplemental-native70.py", "scripts/qa/native70-smoke/receiver/build.py")]'
+          fi
 
           archive="$RUNNER_TEMP/android-emulator-37.1.11.zip"
           curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
@@ -184,8 +199,12 @@ jobs:
           fi
           emulator="$RUNNER_TEMP/android-qa-emulator/emulator/emulator"
           adb="$ANDROID_HOME/platform-tools/adb"
+          back_camera=none
+          if [[ "$QA_NATIVE_SMOKE" == true ]]; then
+            back_camera=emulated
+          fi
           "$emulator" -avd manager247_qa -port 5554 -accel on -gpu swiftshader \
-            -no-window -no-snapshot -no-boot-anim -no-audio -camera-back none -camera-front none \
+            -no-window -no-snapshot -no-boot-anim -no-audio -camera-back "$back_camera" -camera-front none \
             >"$RUNNER_TEMP/android-qa-emulator.log" 2>&1 &
           emulator_pid=$!
           trap 'timeout 10 "$adb" -s "$ANDROID_SERIAL" emu kill >/dev/null 2>&1 || true; kill "$emulator_pid" 2>/dev/null || true' EXIT
@@ -218,6 +237,40 @@ jobs:
           "$adb" shell wm dismiss-keyguard
           python3 scripts/qa/android-native-upgrade.py "${mode[@]}" \
             --adb "$adb" --apk-dir "$QA_APK_DIR" --evidence "$QA_EVIDENCE"
+          if [[ "$QA_NATIVE_SMOKE" == true ]]; then
+            unset QA_STAGING_EMAIL QA_STAGING_OTP
+            smoke_root=scripts/qa/native70-smoke
+            mkdir -p "$QA_EVIDENCE/native-smoke"
+            smoke_failed=0
+            qa_jdk="${JAVA_HOME_17_X64:-}"
+            if [[ -n "$qa_jdk" && -x "$qa_jdk/bin/javac" &&
+                  -f "$ANDROID_HOME/platforms/android-36/android.jar" ]] &&
+               "$qa_jdk/bin/java" -version 2>&1 | grep -q 'version "17\.'; then
+              if python3 "$smoke_root/receiver/build.py" --sdk "$ANDROID_HOME" --jdk "$qa_jdk" \
+                  >"$RUNNER_TEMP/qa-pdf-receiver-build.log" 2>&1; then
+                cp "$smoke_root/receiver/out/build-evidence.json" "$QA_EVIDENCE/native-smoke/receiver-build.json"
+                if ! "$adb" install "$smoke_root/receiver/out/qa-pdf-sink.apk" \
+                    >"$RUNNER_TEMP/qa-pdf-receiver-install.log" 2>&1; then
+                  echo 'The local PDF recipient did not install.' >&2
+                  smoke_failed=1
+                fi
+              else
+                echo 'The local PDF recipient build failed.' >&2
+                smoke_failed=1
+              fi
+            else
+              echo 'Native PDF smoke requires the installed JDK 17 and Android platform 36.' >&2
+              smoke_failed=1
+            fi
+            for smoke_mode in pdf gallery camera; do
+              if ! python3 "$smoke_root/supplemental-native70.py" --execute --mode "$smoke_mode" \
+                  --base-harness scripts/qa/android-native-upgrade.py --base-evidence "$QA_EVIDENCE" \
+                  --evidence "$QA_EVIDENCE/native-smoke/$smoke_mode" --apk70-sha256 "$APK70_SHA256" --adb "$adb"; then
+                smoke_failed=1
+              fi
+            done
+            exit "$smoke_failed"
+          fi
 
       - name: Upload synthetic QA checkpoints
         if: ${{ always() }}
@@ -230,5 +283,11 @@ jobs:
             ${{ runner.temp }}/android-qa-evidence/apk*-recipe.mp4
             ${{ runner.temp }}/android-qa-evidence/acceleration.txt
             ${{ runner.temp }}/android-qa-evidence/emulator.txt
+            ${{ runner.temp }}/android-qa-evidence/native-smoke/receiver-build.json
+            ${{ runner.temp }}/android-qa-evidence/native-smoke/*/supplemental-results.json
+            ${{ runner.temp }}/android-qa-evidence/native-smoke/*/failure-diagnostics.json
+            ${{ runner.temp }}/android-qa-evidence/native-smoke/*/native-*.png
+            ${{ runner.temp }}/android-qa-evidence/native-smoke/pdf/native-recipe.pdf
+            ${{ runner.temp }}/android-qa-evidence/native-smoke/gallery/qa-native-image.png
           if-no-files-found: ignore
           retention-days: 2
