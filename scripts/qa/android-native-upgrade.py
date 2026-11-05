@@ -25,6 +25,10 @@ SEND_CODE = ("Trimite codul de acces", "Send access code")
 OTP = ("Cod din email", "Code from email")
 VERIFY = ("Intră în aplicație", "Enter the app")
 ONBOARDING = ("Sari peste", "Skip", "Intră în Manager 24/7", "Open Manager 24/7")
+LOCATION_SETUP = ("Configurează locația", "Set up your location")
+LOCATION_NAME = ("Denumirea locației", "Location name")
+LOCATION_ADDRESS = ("Adresa", "Address")
+CREATE_LOCATION = ("Creează locația și continuă", "Create location and continue")
 CREATE_RECIPE = ("Creează rețetă", "Create recipe")
 MY_RECIPES = ("Rețetele mele", "My recipes")
 SEARCH_RECIPE = ("Caută o rețetă", "Search a recipe")
@@ -45,6 +49,12 @@ SAVE_EQUIPMENT = ("Salvează utilaj", "Save equipment")
 INITIAL_LABELS = EMAIL + HAVE_CODE + SEND_CODE + ONBOARDING + HOME + (
     "Manager 24/7", "Manager 24/7 by PARADIM", "Loading", "Se încarcă", "Close app",
 )
+FAILURE_LABELS = (HOME + RECIPES + PRODUCTION + ONBOARDING + LOCATION_SETUP + CREATE_LOCATION
+                  + HAVE_CODE + SEND_CODE + VERIFY + (
+                      "Nu am putut verifica locația", "Could not verify your location",
+                      "Costuri clare. Profit controlat.", "Clear costs. Controlled profit.",
+                      "Reîncearcă", "Retry", "Deconectare", "Sign out", "Loading", "Se încarcă",
+                  ))
 
 
 class QAError(Exception):
@@ -159,6 +169,7 @@ class Device:
     def __init__(self, adb, serial, evidence):
         self.command = [adb, "-s", serial]
         self.evidence = evidence
+        self.phase = "initialization"
         resolution = self.adb("read display dimensions", "shell", "wm", "size").decode()
         match = re.findall(r"(\d+)x(\d+)", resolution)
         require(match, "Android display dimensions are unavailable")
@@ -398,6 +409,52 @@ class Device:
             json.dumps(diagnostic, indent=2) + "\n", encoding="utf-8",
         )
 
+    def failure_diagnostics(self):
+        """Retain fixed navigation labels only after credentials may have been entered."""
+        def read(*command):
+            try:
+                return self.adb("inspect failed Android navigation", "shell", *command,
+                                timeout=5).decode(errors="replace")
+            except QAError:
+                return ""
+
+        nodes = self.hierarchy()
+        safe_nodes = []
+        for node in nodes[:120]:
+            cls = node.get("class", "")
+            # Editable text and descriptions can contain email, OTP or fixture input.
+            if cls == "android.widget.EditText":
+                continue
+            label = next((value for value in FAILURE_LABELS if label_matches(node, (value,))), None)
+            if label:
+                safe_nodes.append({"label": label, "class": cls if re.fullmatch(
+                    r"android\.[\w.$]+", cls) else "other", "bounds": bounds(node)})
+        activities = read("dumpsys", "activity", "activities")
+        resumed = next((line for line in activities.splitlines()
+                        if "mResumedActivity" in line or "topResumedActivity" in line), "")
+        activity = re.search(rf"\b{re.escape(PACKAGE)}/([A-Za-z0-9_.$]+)\b", resumed)
+        exits = read("dumpsys", "activity", "exit-info", PACKAGE)
+        reason = re.search(r"\breason=(\d+)\b", exits)
+        crashes = filtered_crashes(read("logcat", "-b", "crash", "-d", "-v", "raw", "-t", "300"))
+        if not crashes:
+            crashes = filtered_crashes(read("dumpsys", "dropbox", "--print", "data_app_crash"),
+                                       dropbox=True)
+        diagnostic = {
+            "phase": self.phase,
+            "focusedAppActivity": f"{PACKAGE}/{activity[1]}" if activity else "unavailable",
+            "appProcessAlive": bool(re.fullmatch(r"\d+(?:\s+\d+)*", read("pidof", PACKAGE).strip())),
+            "lastAppExitReasonCode": int(reason[1]) if reason else None,
+            "appCrashes": crashes,
+            "hierarchyStatus": self.hierarchy_status,
+            "visibleAppNodeCount": len(nodes),
+            "authControlsVisible": email_control(nodes) is not None or bool(self.labels(nodes, OTP, editable=True)),
+            "visibleNavigation": safe_nodes,
+            "screenshotCaptured": False,
+        }
+        (self.evidence / "failure-diagnostics.json").write_text(
+            json.dumps(diagnostic, indent=2) + "\n", encoding="utf-8",
+        )
+
     @contextmanager
     def recording(self, filename, expected):
         self.require_fixture_screen(expected)
@@ -442,20 +499,53 @@ def wait_for_sign_in(device):
     return device.wait("the initial sign-in email field", email_control, scroll="both", seconds=90)
 
 
-def sign_in(device, email_field, email, code):
+def sign_in(device, email_field, email, code, location_name, entry):
+    device.phase = "login-email"
     device.type(email_field, email)
+    device.phase = "login-existing-code"
     device.click(HAVE_CODE, scroll="down")
+    device.phase = "login-code-entry"
     device.type(device.find(OTP, scroll="down"), code)
+    device.phase = "login-submit"
     device.click(VERIFY, scroll="down")
+    entry["emailCodeSubmitted"] = True
 
     def choose(nodes):
-        return next(iter(device.labels(nodes, HOME + ONBOARDING)), None)
+        if device.labels(nodes, HOME):
+            return "home", None
+        if not entry.get("firstLocationSubmitted") and device.labels(nodes, LOCATION_SETUP):
+            return "location", None
+        if not entry.get("onboardingDismissed"):
+            controls = device.labels(nodes, ONBOARDING)
+            if controls:
+                return "onboarding", max(controls, key=lambda node: node.get("clickable") == "true")
+        return None
 
-    route = device.wait("signed-in home or first-use onboarding", choose, seconds=90)
-    if label_matches(route, ONBOARDING):
-        device.tap(route)
-    device.find(HOME, seconds=60)
-    print("Synthetic staging owner authenticated through the email-code UI.", flush=True)
+    # A new owner passes onboarding and first-location setup before the app exposes tabs.
+    device.phase = "login-route"
+    for _ in range(3):
+        route, control = device.wait("signed-in home, onboarding or first-location setup", choose,
+                                     scroll="both", seconds=90)
+        if route == "home":
+            entry["homeConfirmed"] = True
+            entry["firstLocationCreated"] = bool(entry.get("firstLocationSubmitted"))
+            device.phase = "home-ready"
+            print("Synthetic staging owner authenticated through the email-code UI.", flush=True)
+            return
+        if route == "onboarding":
+            device.phase = "onboarding-dismiss"
+            device.tap(control)
+            entry["onboardingDismissed"] = True
+            device.phase = "await-home-after-onboarding"
+        else:
+            device.phase = "first-location-fill"
+            device.set_field(LOCATION_NAME, location_name, scroll="both")
+            device.set_field(LOCATION_ADDRESS, "1 Test Street", scroll="both")
+            device.phase = "first-location-save"
+            device.click(CREATE_LOCATION, scroll="both")
+            entry["firstLocationSubmitted"] = True
+            device.phase = "await-home-after-location"
+    raise QAError("The bounded first-use route did not reach Home")
 
 
 def ingredient_field(device, name, labels):
@@ -586,6 +676,7 @@ def run(device, apk_dir, verified, result):
     brand = "QABrand"
     ingredients = (("QACarrot", "125", "12"), ("QARice", "250", "8"))
 
+    device.phase = "install-baseline"
     device.install(apk_dir / "apk68.apk")
     original = device.package_info(68)
     launch_status = "failed"
@@ -595,15 +686,20 @@ def run(device, apk_dir, verified, result):
     except QAError:
         device.initial_diagnostics(launch_status, email_found=False)
         raise
-    sign_in(device, email_field, email, code)
+    entry = {"emailCodeSubmitted": False, "homeConfirmed": False}
+    result["entry"] = entry
+    sign_in(device, email_field, email, code, f"QA Kitchen {suffix}", entry)
+    device.phase = "create-recipe"
     create_recipe(device, title, ingredients)
     # Start from the app's normal entry point before going to another module.
     relaunch(device)
+    device.phase = "create-equipment"
     create_equipment(device, equipment, brand)
 
     versions = [entry["versionCode"] for entry in verified]
     for version in versions:
         phase = f"apk{version}"
+        device.phase = f"verify-{phase}"
         if version != 68:
             device.stop()
             device.install(apk_dir / f"{phase}.apk", upgrade=True)
@@ -636,6 +732,7 @@ def main():
     parser.add_argument("--diagnostics-only", action="store_true")
     args = parser.parse_args()
     result = {"status": "failed", "checkpoints": []}
+    device = None
     args.evidence.mkdir(parents=True, exist_ok=True)
     try:
         verified = json.loads((args.evidence / "verified-apks.json").read_text(encoding="utf-8"))
@@ -670,6 +767,12 @@ def main():
     except Exception as error:
         result["failure"] = f"Unexpected harness error ({type(error).__name__})"
     finally:
+        if result["status"] == "failed" and device is not None:
+            try:
+                device.failure_diagnostics()
+                result["failureDiagnosticsCaptured"] = True
+            except Exception:
+                result["failureDiagnosticsCaptured"] = False
         (args.evidence / "upgrade-results.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     if result["status"] == "failed":
         print(result["failure"], file=sys.stderr)
