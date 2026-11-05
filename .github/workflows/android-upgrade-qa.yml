@@ -3,6 +3,11 @@ name: Android staging upgrade QA
 on:
   workflow_dispatch:
     inputs:
+      diagnostics_only:
+        description: Install APK 68 and collect initial Android UI diagnostics without signing in
+        type: boolean
+        required: false
+        default: false
       apk70_sha256:
         description: Optional verified SHA-256 of the finished staging APK 70
         type: string
@@ -22,6 +27,7 @@ jobs:
     timeout-minutes: 25
     env:
       ANDROID_SERIAL: emulator-5554
+      QA_DIAGNOSTICS_ONLY: ${{ inputs.diagnostics_only }}
       APK70_SHA256: ${{ inputs.apk70_sha256 }}
 
     steps:
@@ -57,6 +63,10 @@ jobs:
             echo 'The optional APK 70 SHA-256 must contain 64 hexadecimal characters.' >&2
             exit 1
           fi
+          if [[ "$QA_DIAGNOSTICS_ONLY" == true && -n "$APK70_SHA256" ]]; then
+            echo 'APK 70 is only accepted in upgrade mode.' >&2
+            exit 1
+          fi
           mkdir -p "$QA_APK_DIR" "$QA_EVIDENCE"
           download_apk() {
             local version="$1" url="$2"
@@ -72,9 +82,11 @@ jobs:
             fi
           }
           download_apk 68 "$APK68_URL"
-          download_apk 69 "$APK69_URL"
-          if [[ -n "$APK70_SHA256" ]]; then
-            download_apk 70 "$APK70_URL"
+          if [[ "$QA_DIAGNOSTICS_ONLY" != true ]]; then
+            download_apk 69 "$APK69_URL"
+            if [[ -n "$APK70_SHA256" ]]; then
+              download_apk 70 "$APK70_URL"
+            fi
           fi
 
       - name: Prepare pinned Android emulator and verify the APKs
@@ -100,7 +112,11 @@ jobs:
             exit 1
           fi
 
-          python3 scripts/qa/android-native-upgrade-verify.py \
+          mode=()
+          if [[ "$QA_DIAGNOSTICS_ONLY" == true ]]; then
+            mode+=(--diagnostics-only)
+          fi
+          python3 scripts/qa/android-native-upgrade-verify.py "${mode[@]}" \
             --apk-dir "$QA_APK_DIR" --aapt "$build_tools/aapt" --apksigner "$build_tools/apksigner" \
             --apk70-sha256 "$APK70_SHA256" --output "$QA_EVIDENCE/verified-apks.json"
 
@@ -118,14 +134,17 @@ jobs:
           printf 'no\n' | "$(dirname "$sdkmanager_path")/avdmanager" create avd \
             --name manager247_qa --package 'system-images;android-30;google_apis;x86_64' --device pixel_3a
 
-      - name: Boot Android and run the staging upgrade
+      - name: Boot Android and run staging QA
         shell: bash
         env:
-          QA_STAGING_EMAIL: ${{ secrets.QA_STAGING_EMAIL }}
-          QA_STAGING_OTP: ${{ secrets.QA_STAGING_OTP }}
+          QA_STAGING_EMAIL: ${{ !inputs.diagnostics_only && secrets.QA_STAGING_EMAIL || '' }}
+          QA_STAGING_OTP: ${{ !inputs.diagnostics_only && secrets.QA_STAGING_OTP || '' }}
         run: |
           set -euo pipefail
-          if [[ -z "$QA_STAGING_EMAIL" || ! "$QA_STAGING_OTP" =~ ^[0-9]{6,10}$ ]]; then
+          mode=()
+          if [[ "$QA_DIAGNOSTICS_ONLY" == true ]]; then
+            mode+=(--diagnostics-only)
+          elif [[ -z "$QA_STAGING_EMAIL" || ! "$QA_STAGING_OTP" =~ ^[0-9]{6,10}$ ]]; then
             echo 'A synthetic staging owner email and a fresh OTP are required.' >&2
             exit 1
           fi
@@ -163,7 +182,7 @@ jobs:
           "$adb" shell settings put global transition_animation_scale 0
           "$adb" shell settings put global animator_duration_scale 0
           "$adb" shell wm dismiss-keyguard
-          python3 scripts/qa/android-native-upgrade.py \
+          python3 scripts/qa/android-native-upgrade.py "${mode[@]}" \
             --adb "$adb" --apk-dir "$QA_APK_DIR" --evidence "$QA_EVIDENCE"
 
       - name: Upload synthetic QA checkpoints

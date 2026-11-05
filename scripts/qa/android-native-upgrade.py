@@ -18,7 +18,9 @@ HOME = ("Acasă", "Home")
 RECIPES = ("Rețete", "Recipes")
 PRODUCTION = ("Producție", "Production")
 EMAIL = ("Adresa de email", "Email address")
+EMAIL_HINT = ("nume@restaurant.ro", "name@restaurant.com")
 HAVE_CODE = ("Am deja un cod", "I already have a code")
+SEND_CODE = ("Trimite codul de acces", "Send access code")
 OTP = ("Cod din email", "Code from email")
 VERIFY = ("Intră în aplicație", "Enter the app")
 ONBOARDING = ("Sari peste", "Skip", "Intră în Manager 24/7", "Open Manager 24/7")
@@ -39,6 +41,9 @@ EQUIPMENT_NAME = ("Denumire", "Name")
 EQUIPMENT_BRAND = ("Marcă", "Brand")
 EQUIPMENT_SHEET = ("Fișă și istoric", "Sheet and history")
 SAVE_EQUIPMENT = ("Salvează utilaj", "Save equipment")
+INITIAL_LABELS = EMAIL + HAVE_CODE + SEND_CODE + ONBOARDING + HOME + (
+    "Manager 24/7", "Manager 24/7 by PARADIM", "Loading", "Se încarcă", "Close app",
+)
 
 
 class QAError(Exception):
@@ -63,6 +68,33 @@ def label_matches(node, labels):
     return any(value == label or value.startswith(f"{label}, tab") for value in values for label in labels)
 
 
+def filtered_crashes(log):
+    lines = log.splitlines()
+    evidence = []
+    for index, line in enumerate(lines):
+        if not re.search(rf"(?:Process: |Cmdline: |>>> ){re.escape(PACKAGE)}(?=[ ,<]|$)", line):
+            continue
+        block = []
+        for candidate in lines[index + 1:index + 36]:
+            if re.search(r"(?:Process: |Cmdline: |>>> )[a-zA-Z0-9_.]+", candidate) and PACKAGE not in candidate:
+                break
+            block.append(candidate)
+        detail = "\n".join(block)
+        java = re.search(r"\b((?:java|javax|android|com\.facebook)\.[\w.$]+(?:Exception|Error))\b", detail)
+        signal = re.search(r"\bsignal (\d+) \((SIG[A-Z]+)\)", detail)
+        frames = re.findall(r"#[0-9]+\s+pc\s+[0-9a-fA-F]+\s+[^\s]*(lib[\w.-]+\.so)\b", detail)
+        entry = {"process": PACKAGE}
+        if java:
+            entry["exceptionClass"] = java[1]
+        if signal:
+            entry["signal"] = f"{signal[1]} {signal[2]}"
+        if frames:
+            entry["nativeLibraries"] = frames[:8]
+        if entry not in evidence:
+            evidence.append(entry)
+    return evidence[-3:]
+
+
 class Device:
     def __init__(self, adb, serial, evidence):
         self.command = [adb, "-s", serial]
@@ -82,7 +114,7 @@ class Device:
         require(result.returncode == 0, f"Android failed to {action}")
         return result.stdout
 
-    def hierarchy(self):
+    def visible_hierarchy(self):
         # Remove the old file first so a failed dump cannot return a stale screen.
         script = (
             "rm -f /sdcard/qa-hierarchy.xml && "
@@ -92,11 +124,16 @@ class Device:
         try:
             root = ET.fromstring(self.adb("read the visible accessibility hierarchy", "shell", script))
         except (ET.ParseError, QAError):
+            self.hierarchy_status = "unreadable"
             return []
+        self.hierarchy_status = "ok"
         return [
             node for node in root.iter("node")
-            if node.get("package") == PACKAGE and node.get("enabled") == "true" and bounds(node)
+            if node.get("enabled") == "true" and bounds(node)
         ]
+
+    def hierarchy(self):
+        return [node for node in self.visible_hierarchy() if node.get("package") == PACKAGE]
 
     @staticmethod
     def labels(nodes, labels, editable=False):
@@ -214,7 +251,9 @@ class Device:
         return info
 
     def launch(self):
-        self.adb("start the Manager 24/7 activity", "shell", "am", "start", "-W", "-n", ACTIVITY)
+        output = self.adb("start the Manager 24/7 activity", "shell", "am", "start", "-W", "-n", ACTIVITY).decode()
+        status = re.search(r"^Status:\s*(ok|timeout)\s*$", output, re.M)
+        return status[1] if status else "unreported"
 
     def stop(self):
         self.adb("force stop Manager 24/7", "shell", "am", "force-stop", PACKAGE)
@@ -222,11 +261,69 @@ class Device:
     def require_fixture_screen(self, expected):
         require(self.labels(self.hierarchy(), expected), "Fixture screen changed before the evidence capture")
 
-    def screenshot(self, name, expected):
-        self.require_fixture_screen(expected)
+    def save_screenshot(self, name):
         png = self.adb("capture the fixture screen", "exec-out", "screencap", "-p")
         require(png.startswith(b"\x89PNG\r\n\x1a\n"), "Android did not provide a PNG screenshot")
         (self.evidence / f"{name}.png").write_bytes(png)
+
+    def screenshot(self, name, expected):
+        self.require_fixture_screen(expected)
+        self.save_screenshot(name)
+
+    def initial_diagnostics(self, launch_status, email_found):
+        # Call only before any credentials have been typed on the fresh install.
+        def read(*command):
+            try:
+                return self.adb("inspect initial Android state", "shell", *command).decode(errors="replace")
+            except QAError:
+                return ""
+
+        windows = read("dumpsys", "window", "windows")
+        focus_line = next((line for line in windows.splitlines() if "mCurrentFocus=" in line), "")
+        focus = re.search(r"\b([A-Za-z0-9_.]+/[A-Za-z0-9_.$]+)\b", focus_line)
+        focused_activity = focus[1] if focus and focus[1].startswith((
+            f"{PACKAGE}/", "com.android.", "com.google.android.",
+        )) else "unavailable"
+        exits = read("dumpsys", "activity", "exit-info", PACKAGE)
+        reason = re.search(r"\breason=(\d+)\b", exits)
+        crashes = filtered_crashes(read("logcat", "-b", "crash", "-d", "-t", "200"))
+
+        nodes = self.visible_hierarchy()
+        safe_nodes = []
+        for node in nodes[:80]:
+            package = node.get("package", "")
+            cls = node.get("class", "")
+            safe = {
+                "source": "app" if package == PACKAGE else "system" if package.startswith(
+                    ("com.android.", "com.google.android.", "android")
+                ) else "other",
+                "class": cls if re.fullmatch(r"android\.[\w.$]+", cls) else "other",
+                "bounds": bounds(node),
+            }
+            label = next((label for label in INITIAL_LABELS if label_matches(node, (label,))), None)
+            if label and package == PACKAGE:
+                safe["label"] = label
+            safe_nodes.append(safe)
+        diagnostic = {
+            "activityStartStatus": launch_status,
+            "focusedActivity": focused_activity,
+            "appProcessAlive": bool(re.fullmatch(r"\d+(?:\s+\d+)*", read("pidof", PACKAGE).strip())),
+            "lastAppExitReasonCode": int(reason[1]) if reason else None,
+            "appCrashes": crashes,
+            "hierarchyStatus": self.hierarchy_status,
+            "visibleAppNodeCount": sum(node.get("package") == PACKAGE for node in nodes),
+            "emailControlDetected": email_found,
+            "visibleNodes": safe_nodes,
+            "screenshotCaptured": False,
+        }
+        try:
+            self.save_screenshot("initial-screen")
+            diagnostic["screenshotCaptured"] = True
+        except QAError:
+            pass
+        (self.evidence / "initial-diagnostics.json").write_text(
+            json.dumps(diagnostic, indent=2) + "\n", encoding="utf-8",
+        )
 
     @contextmanager
     def recording(self, filename, expected):
@@ -258,8 +355,22 @@ class Device:
             pending.unlink(missing_ok=True)
 
 
-def sign_in(device, email, code):
-    device.set_field(EMAIL, email, scroll="down")
+def email_control(nodes):
+    inputs = [node for node in nodes if node.get("class") == "android.widget.EditText"]
+    known = Device.labels(inputs, EMAIL + EMAIL_HINT)
+    if len(known) == 1:
+        return known[0]
+    if len(inputs) == 1 and Device.labels(nodes, HAVE_CODE) and Device.labels(nodes, SEND_CODE):
+        return inputs[0]
+    return None
+
+
+def wait_for_sign_in(device):
+    return device.wait("the initial sign-in email field", email_control, scroll="both", seconds=90)
+
+
+def sign_in(device, email_field, email, code):
+    device.type(email_field, email)
     device.click(HAVE_CODE, scroll="down")
     device.type(device.find(OTP, scroll="down"), code)
     device.click(VERIFY, scroll="down")
@@ -404,8 +515,14 @@ def run(device, apk_dir, verified, result):
 
     device.install(apk_dir / "apk68.apk")
     original = device.package_info(68)
-    device.launch()
-    sign_in(device, email, code)
+    launch_status = "failed"
+    try:
+        launch_status = device.launch()
+        email_field = wait_for_sign_in(device)
+    except QAError:
+        device.initial_diagnostics(launch_status, email_found=False)
+        raise
+    sign_in(device, email_field, email, code)
     create_recipe(device, title, ingredients)
     # Start from the app's normal entry point before going to another module.
     relaunch(device)
@@ -443,23 +560,39 @@ def main():
     parser.add_argument("--adb", required=True)
     parser.add_argument("--apk-dir", type=Path, required=True)
     parser.add_argument("--evidence", type=Path, required=True)
+    parser.add_argument("--diagnostics-only", action="store_true")
     args = parser.parse_args()
     result = {"status": "failed", "checkpoints": []}
     args.evidence.mkdir(parents=True, exist_ok=True)
     try:
         verified = json.loads((args.evidence / "verified-apks.json").read_text(encoding="utf-8"))
-        require([item["versionCode"] for item in verified] in ([68, 69], [68, 69, 70]),
+        expected = ([68],) if args.diagnostics_only else ([68, 69], [68, 69, 70])
+        require([item["versionCode"] for item in verified] in expected,
                 "The ordered APK verification record is missing or invalid")
         device = Device(args.adb, os.environ.get("ANDROID_SERIAL", "emulator-5554"), args.evidence)
-        run(device, args.apk_dir, verified, result)
-        result["status"] = "passed"
+        if args.diagnostics_only:
+            device.install(args.apk_dir / "apk68.apk")
+            result["installedBaseline"] = device.package_info(68)
+            launch_status = "failed"
+            try:
+                launch_status = device.launch()
+                device.wait("the initial sign-in email field", email_control, seconds=90)
+                email_found = True
+            except QAError:
+                email_found = False
+            device.initial_diagnostics(launch_status, email_found)
+            result["status"] = "diagnostic"
+            print("Initial Android diagnostics collected before credential input.")
+        else:
+            run(device, args.apk_dir, verified, result)
+            result["status"] = "passed"
     except QAError as error:
         result["failure"] = str(error)
     except Exception as error:
         result["failure"] = f"Unexpected harness error ({type(error).__name__})"
     finally:
         (args.evidence / "upgrade-results.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
-    if result["status"] != "passed":
+    if result["status"] == "failed":
         print(result["failure"], file=sys.stderr)
         return 1
     return 0

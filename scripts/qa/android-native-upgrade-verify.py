@@ -73,12 +73,14 @@ def main():
     parser.add_argument("--aapt", required=True)
     parser.add_argument("--apksigner", required=True)
     parser.add_argument("--apk70-sha256", default="")
+    parser.add_argument("--diagnostics-only", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
     try:
-        versions = EXPECTED_SHA256.copy()
+        versions = {68: EXPECTED_SHA256[68]} if args.diagnostics_only else EXPECTED_SHA256.copy()
         if args.apk70_sha256:
+            require(not args.diagnostics_only, "APK 70 is only accepted in upgrade mode")
             require(re.fullmatch(r"[0-9a-fA-F]{64}", args.apk70_sha256), "Invalid APK 70 SHA-256")
             versions[70] = args.apk70_sha256.lower()
         verified = [
