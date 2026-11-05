@@ -1,4 +1,4 @@
-import { createElement } from 'react';
+import { createElement, useEffect } from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
@@ -7,7 +7,7 @@ const state = vi.hoisted(() => ({ locale: 'en', profile: { defaultLocationId: nu
 }));
 vi.mock('@/contexts/locale-context', () => ({ useI18n: () => ({ locale: state.locale }) }));
 vi.mock('@/contexts/auth-context', () => ({ useAuth: () => ({ user: null }) }));
-vi.mock('expo-router', () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock('expo-router', () => ({ useRouter: () => ({ push: vi.fn() }), useFocusEffect: (callback: () => void | (() => void)) => useEffect(callback, [callback]) }));
 vi.mock('react-native', () => ({ Platform: { select: (values: { default: unknown }) => values.default }, Alert: { alert: vi.fn() }, StyleSheet: { create: (styles: object) => styles }, View: 'View', Text: 'Text' }));
 vi.mock('@expo/vector-icons', () => ({ Ionicons: 'Icon' }));
 vi.mock('@/components/tool-header', () => ({ ToolHeader: 'ToolHeader' }));
@@ -15,7 +15,9 @@ vi.mock('@/components/haccp-time-input', () => ({ HaccpTimeInput: 'HaccpTimeInpu
 vi.mock('@/components/inputs', () => ({ ChoiceRow: 'ChoiceRow', Select: 'Select' }));
 vi.mock('@/components/ui', () => Object.fromEntries(['AppButton', 'Body', 'Card', 'Field', 'IconButton', 'Screen', 'SectionHeader', 'StatusPill'].map(name => [name, name])));
 vi.mock('@/lib/locations-repository', () => ({ listLocations: async () => [] }));
-vi.mock('@/lib/haccp-routine-repository', () => ({ defaultHaccpProfile: () => state.profile, loadHaccpProfile: async () => state.profile,
+vi.mock('@/lib/haccp-routine-repository', () => ({ defaultHaccpProfile: () => state.profile,
+  loadHaccpProfileForEntry: async () => state.profile, readHaccpProfileSnapshot: async () => state.profile,
+  readHaccpEquipmentRegistrySnapshot: async () => [state.equipment],
   listHaccpEquipment: async () => [state.equipment], saveHaccpProfile: vi.fn(), saveHaccpEquipment: vi.fn(), deactivateHaccpEquipment: vi.fn(),
 }));
 

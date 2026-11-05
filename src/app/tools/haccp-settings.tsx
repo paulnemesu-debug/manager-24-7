@@ -6,8 +6,8 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 
 import { HaccpTimeInput } from '@/components/haccp-time-input';
@@ -21,7 +21,9 @@ import {
   deactivateHaccpEquipment,
   defaultHaccpProfile,
   listHaccpEquipment,
-  loadHaccpProfile,
+  loadHaccpProfileForEntry,
+  readHaccpEquipmentRegistrySnapshot,
+  readHaccpProfileSnapshot,
   saveHaccpEquipment,
   saveHaccpProfile,
 } from '@/lib/haccp-routine-repository';
@@ -42,11 +44,15 @@ const emptyEquipment = (locationId: string | null, sortOrder: number): HaccpEqui
 });
 
 export default function HaccpSettingsScreen() {
-  const router = useRouter();
   const auth = useAuth();
-  const { locale } = useI18n();
   const userId = auth.user?.id ?? 'demo';
   const identity = auth.user?.email ?? 'Operator';
+  return <HaccpSettingsSession key={userId} userId={userId} identity={identity} />;
+}
+
+function HaccpSettingsSession({ userId, identity }: { userId: string; identity: string }) {
+  const router = useRouter();
+  const { locale } = useI18n();
   const [locations, setLocations] = useState<BusinessLocation[]>([]);
   const [equipment, setEquipment] = useState<HaccpEquipment[]>([]);
   const [profile, setProfile] = useState(() => defaultHaccpProfile(identity));
@@ -54,71 +60,124 @@ export default function HaccpSettingsScreen() {
   const [minimum, setMinimum] = useState('0');
   const [maximum, setMaximum] = useState('4');
   const [busy, setBusy] = useState(false);
+  const [profileReady, setProfileReady] = useState(false);
+  const [equipmentReady, setEquipmentReady] = useState(false);
+  const [loadErrors, setLoadErrors] = useState<Record<string, boolean>>({});
+  const mounted = useRef(true);
+  const loadingGeneration = useRef(0);
+  const profileRevision = useRef(0);
+  const equipmentRevision = useRef(0);
+  const draftRevision = useRef(0);
+  const profileDirty = useRef(false);
+  const draftDirty = useRef(false);
+  const saving = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; loadingGeneration.current += 1; };
+  }, []);
 
-  const reload = useCallback(async () => {
-    const [nextLocations, nextEquipment, nextProfile] = await Promise.all([
-      listLocations(userId),
-      listHaccpEquipment(userId),
-      loadHaccpProfile(userId, identity),
-    ]);
-    setLocations(nextLocations);
-    setEquipment(nextEquipment);
-    setProfile(nextProfile);
-    setDraft((current) => ({
-      ...current,
-      locationId: current.locationId ?? nextProfile.defaultLocationId,
-      sortOrder: Math.max(current.sortOrder, nextEquipment.length + 1),
-    }));
+  const reload = useCallback(() => {
+    const generation = ++loadingGeneration.current;
+    const profileVersion = profileRevision.current, equipmentVersion = equipmentRevision.current;
+    const current = () => mounted.current && generation === loadingGeneration.current;
+    setLoadErrors({});
+    const failed = (key: string) => { if (current()) setLoadErrors(previous => ({ ...previous, [key]: true })); };
+    const applyProfile = (next: typeof profile) => {
+      if (!current() || profileRevision.current !== profileVersion || profileDirty.current) return;
+      setProfile(next); setProfileReady(true);
+      if (!draftDirty.current) setDraft(previous => ({ ...previous, locationId: next.defaultLocationId }));
+    };
+    const applyEquipment = (next: HaccpEquipment[]) => {
+      if (!current() || equipmentRevision.current !== equipmentVersion) return;
+      const active = next.filter(item => item.active);
+      setEquipment(active); setEquipmentReady(true);
+      if (!draftDirty.current) setDraft(previous => ({ ...previous, sortOrder: active.length + 1 }));
+    };
+    void (async () => {
+      try {
+        const cached = await readHaccpProfileSnapshot(userId);
+        if (!current()) return;
+        if (cached) applyProfile(cached);
+        applyProfile(await loadHaccpProfileForEntry(userId, identity));
+      } catch { failed('profile'); }
+    })();
+    void (async () => {
+      try {
+        applyEquipment(await readHaccpEquipmentRegistrySnapshot(userId));
+        if (current()) applyEquipment(await listHaccpEquipment(userId));
+      } catch { failed('equipment'); }
+    })();
+    void listLocations(userId).then(next => { if (current()) setLocations(next); }).catch(() => failed('locations'));
   }, [identity, userId]);
 
-  useEffect(() => { void reload(); }, [reload]);
+  useFocusEffect(useCallback(() => {
+    reload();
+    return () => { loadingGeneration.current += 1; };
+  }, [reload]));
+
+  const changeProfile = (update: (current: typeof profile) => typeof profile) => {
+    if (!profileReady || saving.current) return;
+    profileDirty.current = true; profileRevision.current += 1; setProfile(update);
+  };
+  const changeDraft = (update: (current: HaccpEquipmentDraft) => HaccpEquipmentDraft) => {
+    if (!profileReady || !equipmentReady || saving.current) return;
+    draftDirty.current = true; draftRevision.current += 1; setDraft(update);
+  };
 
   const chooseLocation = (locationId: string | null) => {
     const location = locations.find((item) => item.id === locationId);
-    setProfile((current) => ({
+    changeProfile((current) => ({
       ...current,
       defaultLocationId: location?.id ?? null,
       defaultLocationName: location?.name ?? current.defaultLocationName,
     }));
-    setDraft((current) => ({ ...current, locationId: location?.id ?? null }));
+    changeDraft((current) => ({ ...current, locationId: location?.id ?? null }));
   };
 
   const persistProfile = async () => {
-    setBusy(true);
+    if (!profileReady || saving.current || !mounted.current) return;
+    const generation = loadingGeneration.current, version = ++profileRevision.current;
+    saving.current = true; setBusy(true);
     try {
       const saved = await saveHaccpProfile(userId, profile);
+      if (!mounted.current || version !== profileRevision.current) return;
+      profileDirty.current = false;
+      if (generation !== loadingGeneration.current) return;
       setProfile(saved);
       Alert.alert(locale === 'ro' ? 'Setări salvate' : 'Settings saved');
     } catch (error) {
-      Alert.alert(locale === 'ro' ? 'Nu s-au salvat' : 'Could not save', error instanceof Error ? error.message : '');
-    } finally { setBusy(false); }
+      if (mounted.current && generation === loadingGeneration.current) Alert.alert(locale === 'ro' ? 'Nu s-au salvat' : 'Could not save', error instanceof Error ? error.message : '');
+    } finally { saving.current = false; if (mounted.current) setBusy(false); }
   };
 
   const changeKind = (kind: HaccpEquipmentKind) => {
+    if (!profileReady || !equipmentReady || saving.current) return;
     const defaults = kind === 'frozen'
       ? { criticalMin: -24, criticalMax: -18, requiredReadings: 3 }
       : kind === 'hot'
         ? { criticalMin: 63, criticalMax: null, requiredReadings: 1 }
         : { criticalMin: 0, criticalMax: 4, requiredReadings: 3 };
-    setDraft((current) => ({ ...current, kind, ...defaults }));
+    changeDraft((current) => ({ ...current, kind, ...defaults }));
     setMinimum(defaults.criticalMin === null ? '' : String(defaults.criticalMin));
     setMaximum(defaults.criticalMax === null ? '' : String(defaults.criticalMax));
   };
 
   const editEquipment = (item: HaccpEquipment) => {
-    setDraft({ ...item });
+    if (!profileReady || !equipmentReady || saving.current) return;
+    changeDraft(() => ({ ...item }));
     setMinimum(item.criticalMin === null ? '' : String(item.criticalMin));
     setMaximum(item.criticalMax === null ? '' : String(item.criticalMax));
   };
 
   const resetEquipment = (count: number) => {
+    draftDirty.current = false; draftRevision.current += 1;
     setDraft(emptyEquipment(profile.defaultLocationId, count + 1));
     setMinimum('0');
     setMaximum('4');
   };
 
   const persistEquipment = async () => {
-    if (!draft.name.trim()) return;
+    if (!profileReady || !equipmentReady || saving.current || !mounted.current || !draft.name.trim()) return;
     const criticalMin = parseHaccpNumber(minimum);
     const criticalMax = parseHaccpNumber(maximum);
     if ((minimum.trim() && criticalMin === null) || (maximum.trim() && criticalMax === null)) {
@@ -131,23 +190,41 @@ export default function HaccpSettingsScreen() {
       Alert.alert(locale === 'ro' ? 'Limită invalidă' : 'Invalid limit');
       return;
     }
-    setBusy(true);
+    const generation = loadingGeneration.current, version = ++equipmentRevision.current, draftVersion = draftRevision.current;
+    let persisted = false;
+    saving.current = true; setBusy(true);
     try {
-      await saveHaccpEquipment(userId, { ...draft, criticalMin, criticalMax });
-      const next = await listHaccpEquipment(userId);
+      const saved = await saveHaccpEquipment(userId, { ...draft, criticalMin, criticalMax });
+      persisted = true;
+      if (!mounted.current || generation !== loadingGeneration.current || version !== equipmentRevision.current) return;
+      // Keep a confirmed ID even if the local readback fails, so a retry cannot
+      // create a second item. The preceding locked load may have discovered rows.
+      if (draftVersion === draftRevision.current) setDraft(previous => ({ ...previous, id: saved.id }));
+      const next = (await readHaccpEquipmentRegistrySnapshot(userId)).filter(item => item.active);
+      if (!mounted.current || generation !== loadingGeneration.current || version !== equipmentRevision.current) return;
       setEquipment(next);
-      resetEquipment(next.length);
+      if (draftVersion === draftRevision.current) resetEquipment(next.length);
     } catch (error) {
-      Alert.alert(locale === 'ro' ? 'Echipamentul nu a fost salvat' : 'Equipment not saved', error instanceof Error ? error.message : '');
-    } finally { setBusy(false); }
+      if (mounted.current && generation === loadingGeneration.current) {
+        if (persisted) setLoadErrors(previous => ({ ...previous, equipment: true }));
+        Alert.alert(persisted
+          ? (locale === 'ro' ? 'Echipamentul a fost salvat; lista nu a putut fi reîncărcată' : 'Equipment saved; the list could not be reloaded')
+          : (locale === 'ro' ? 'Echipamentul nu a fost salvat' : 'Equipment not saved'), error instanceof Error ? error.message : '');
+      }
+    } finally { saving.current = false; if (mounted.current) setBusy(false); }
   };
 
   const removeEquipment = async (item: HaccpEquipment) => {
-    setBusy(true);
+    if (!profileReady || !equipmentReady || saving.current || !mounted.current) return;
+    const generation = loadingGeneration.current, version = ++equipmentRevision.current;
+    saving.current = true; setBusy(true);
     try {
       await deactivateHaccpEquipment(userId, item);
+      if (!mounted.current || generation !== loadingGeneration.current || version !== equipmentRevision.current) return;
       setEquipment((current) => current.filter((entry) => entry.id !== item.id));
-    } finally { setBusy(false); }
+    } catch (error) {
+      if (mounted.current && generation === loadingGeneration.current) Alert.alert(locale === 'ro' ? 'Echipamentul nu a fost șters' : 'Equipment not deleted', error instanceof Error ? error.message : '');
+    } finally { saving.current = false; if (mounted.current) setBusy(false); }
   };
 
   return (
@@ -156,6 +233,12 @@ export default function HaccpSettingsScreen() {
         title={locale === 'ro' ? 'Configurare HACCP' : 'HACCP setup'}
         subtitle={locale === 'ro' ? 'Nomenclator, responsabil și limite critice' : 'Register, responsible person and critical limits'}
       />
+
+      {Object.values(loadErrors).some(Boolean) && <Card>
+        <Body>{locale === 'ro' ? 'Setările HACCP nu au putut fi încărcate. Datele salvate au fost păstrate.' : 'HACCP settings could not be loaded. Saved data has been preserved.'}</Body>
+        <AppButton label={locale === 'ro' ? 'Reîncearcă încărcarea setărilor' : 'Retry loading settings'} variant="secondary" onPress={reload} />
+      </Card>}
+      {!profileReady && !Object.values(loadErrors).some(Boolean) && <Body>{locale === 'ro' ? 'Se încarcă setările salvate…' : 'Loading saved settings…'}</Body>}
 
       <Card>
         <SectionHeader eyebrow={locale === 'ro' ? 'ANTET AUTOMAT' : 'AUTOMATIC HEADER'} title={locale === 'ro' ? 'Locație și responsabil' : 'Location and responsible person'} />
@@ -170,21 +253,23 @@ export default function HaccpSettingsScreen() {
         )}
         <Field
           label={locale === 'ro' ? 'Denumire tipărită în fișe' : 'Name printed on records'}
-          value={profile.defaultLocationName}
-          onChangeText={(value) => setProfile((current) => ({ ...current, defaultLocationName: value }))}
+          value={profileReady ? profile.defaultLocationName : ''}
+          editable={profileReady && !busy}
+          onChangeText={(value) => changeProfile((current) => ({ ...current, defaultLocationName: value }))}
         />
         <Field
           label={locale === 'ro' ? 'Responsabil implicit' : 'Default responsible person'}
-          value={profile.responsibleName}
-          onChangeText={(value) => setProfile((current) => ({ ...current, responsibleName: value }))}
+          value={profileReady ? profile.responsibleName : ''}
+          editable={profileReady && !busy}
+          onChangeText={(value) => changeProfile((current) => ({ ...current, responsibleName: value }))}
         />
         <HaccpTimeInput
           label={locale === 'ro' ? 'Ora deschiderii turei' : 'Shift opening time'}
           locale={locale}
           value={profile.shiftStartTime}
-          onChange={(value) => setProfile((current) => ({ ...current, shiftStartTime: value }))}
+          onChange={(value) => changeProfile((current) => ({ ...current, shiftStartTime: value }))}
         />
-        <AppButton label={locale === 'ro' ? 'Salvează antetul' : 'Save header'} icon="save-outline" loading={busy} onPress={() => void persistProfile()} />
+        <AppButton label={locale === 'ro' ? 'Salvează antetul' : 'Save header'} icon="save-outline" disabled={!profileReady} loading={busy} onPress={() => void persistProfile()} />
       </Card>
 
       <Card tone="soft">
@@ -220,7 +305,7 @@ export default function HaccpSettingsScreen() {
 
       <Card tone="gold">
         <SectionHeader eyebrow={draft.id ? (locale === 'ro' ? 'EDITARE' : 'EDITING') : (locale === 'ro' ? 'ECHIPAMENT NOU' : 'NEW EQUIPMENT')} title={draft.id ? draft.name : (locale === 'ro' ? 'Adaugă echipament' : 'Add equipment')} />
-        <Field label={locale === 'ro' ? 'Denumire' : 'Name'} value={draft.name} onChangeText={(name) => setDraft((current) => ({ ...current, name }))} />
+        <Field label={locale === 'ro' ? 'Denumire' : 'Name'} value={draft.name} editable={profileReady && equipmentReady && !busy} onChangeText={(name) => changeDraft((current) => ({ ...current, name }))} />
         <ChoiceRow
           label={locale === 'ro' ? 'Tip' : 'Type'}
           value={draft.kind}
@@ -234,13 +319,13 @@ export default function HaccpSettingsScreen() {
           ]}
         />
         <View style={styles.limitRow}>
-          <View style={styles.copy}><Field label="Min °C" value={minimum} keyboardType="decimal-pad" onChangeText={setMinimum} /></View>
-          <View style={styles.copy}><Field label="Max °C" value={maximum} keyboardType="decimal-pad" onChangeText={setMaximum} /></View>
+          <View style={styles.copy}><Field label="Min °C" value={minimum} editable={profileReady && equipmentReady && !busy} keyboardType="decimal-pad" onChangeText={(value) => { if (!profileReady || !equipmentReady || saving.current) return; changeDraft(current => current); setMinimum(value); }} /></View>
+          <View style={styles.copy}><Field label="Max °C" value={maximum} editable={profileReady && equipmentReady && !busy} keyboardType="decimal-pad" onChangeText={(value) => { if (!profileReady || !equipmentReady || saving.current) return; changeDraft(current => current); setMaximum(value); }} /></View>
         </View>
         <ChoiceRow
           label={locale === 'ro' ? 'Citiri pe zi' : 'Readings per day'}
           value={String(draft.requiredReadings)}
-          onChange={(value) => setDraft((current) => {
+          onChange={(value) => changeDraft((current) => {
             const requiredReadings = Number(value);
             const defaults = ['06:00', '12:00', '18:00'];
             return {
@@ -255,7 +340,7 @@ export default function HaccpSettingsScreen() {
           options={[{ value: '1', label: '1' }, { value: '2', label: '2' }, { value: '3', label: '3' }]}
           large
         />
-        <AppButton label={locale === 'ro' ? 'Salvează echipamentul' : 'Save equipment'} icon="checkmark-circle-outline" disabled={!draft.name.trim()} loading={busy} fullWidth onPress={() => void persistEquipment()} />
+        <AppButton label={locale === 'ro' ? 'Salvează echipamentul' : 'Save equipment'} icon="checkmark-circle-outline" disabled={!profileReady || !equipmentReady || !draft.name.trim()} loading={busy} fullWidth onPress={() => void persistEquipment()} />
         {!!draft.id && <AppButton label={locale === 'ro' ? 'Renunță la editare' : 'Cancel editing'} variant="ghost" onPress={() => resetEquipment(equipment.length)} />}
       </Card>
     </Screen>
