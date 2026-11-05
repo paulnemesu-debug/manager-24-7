@@ -642,6 +642,12 @@ def main():
         expected = ([68],) if args.diagnostics_only else ([68, 69], [68, 69, 70])
         require([item["versionCode"] for item in verified] in expected,
                 "The ordered APK verification record is missing or invalid")
+        identities = {(item.get("artifactSet", "arm64-original"),
+                       item.get("evidenceClass", "original-arm64-staging-apk"), item["nativeAbi"])
+                      for item in verified}
+        require(len(identities) == 1, "The APK evidence mixes different artifact sets or architectures")
+        artifact_set, evidence_class, native_abi = identities.pop()
+        result.update(artifactSet=artifact_set, evidenceClass=evidence_class, nativeAbi=native_abi)
         device = Device(args.adb, os.environ.get("ANDROID_SERIAL", "emulator-5554"), args.evidence)
         if args.diagnostics_only:
             device.install(args.apk_dir / "apk68.apk")

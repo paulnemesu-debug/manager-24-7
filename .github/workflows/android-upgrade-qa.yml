@@ -3,6 +3,13 @@ name: Android staging upgrade QA
 on:
   workflow_dispatch:
     inputs:
+      artifact_set:
+        description: Select the original ARM64 APKs or historical source builds compiled for the emulator
+        type: choice
+        options:
+          - arm64-original
+          - x86_64-source-matched
+        default: arm64-original
       diagnostics_only:
         description: Install APK 68 and collect initial Android UI diagnostics without signing in
         type: boolean
@@ -28,6 +35,7 @@ jobs:
     env:
       ANDROID_SERIAL: emulator-5554
       QA_DIAGNOSTICS_ONLY: ${{ inputs.diagnostics_only }}
+      QA_ARTIFACT_SET: ${{ inputs.artifact_set || 'arm64-original' }}
       APK70_SHA256: ${{ inputs.apk70_sha256 }}
 
     steps:
@@ -41,8 +49,20 @@ jobs:
           APK68_URL: ${{ secrets.QA_APK68_URL }}
           APK69_URL: ${{ secrets.QA_APK69_URL }}
           APK70_URL: ${{ secrets.QA_APK70_URL }}
+          X86_APK68_URL: ${{ secrets.QA_X86_APK68_URL }}
+          X86_APK69_URL: ${{ secrets.QA_X86_APK69_URL }}
+          X86_APK70_URL: ${{ secrets.QA_X86_APK70_URL }}
         run: |
           set -euo pipefail
+          case "$QA_ARTIFACT_SET" in
+            arm64-original) ;;
+            x86_64-source-matched)
+              APK68_URL="$X86_APK68_URL"
+              APK69_URL="$X86_APK69_URL"
+              APK70_URL="$X86_APK70_URL"
+              ;;
+            *) echo 'Unknown APK artifact set.' >&2; exit 1 ;;
+          esac
           export ANDROID_AVD_HOME="$RUNNER_TEMP/android-qa-avd"
           export QA_APK_DIR="$RUNNER_TEMP/android-qa-apks"
           export QA_EVIDENCE="$RUNNER_TEMP/android-qa-evidence"
@@ -118,6 +138,7 @@ jobs:
           fi
           python3 scripts/qa/android-native-upgrade-verify.py "${mode[@]}" \
             --apk-dir "$QA_APK_DIR" --aapt "$build_tools/aapt" --apksigner "$build_tools/apksigner" \
+            --artifact-set "$QA_ARTIFACT_SET" \
             --apk70-sha256 "$APK70_SHA256" --output "$QA_EVIDENCE/verified-apks.json"
 
           archive="$RUNNER_TEMP/android-emulator-37.1.11.zip"
