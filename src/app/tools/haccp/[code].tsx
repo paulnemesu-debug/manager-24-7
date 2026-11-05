@@ -8,7 +8,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { HaccpField } from '@/components/haccp-field';
@@ -31,7 +31,7 @@ import { exportHaccpDocumentPdf } from '@/lib/haccp-export';
 import { invalidHaccpValue, type HaccpValueIssue } from '@/lib/haccp-input-validation';
 import { createHaccpDocumentId, createHaccpRowId } from '@/lib/haccp-repository';
 import { syncHaccpReminders } from '@/lib/haccp-reminders';
-import { defaultHaccpProfile, loadHaccpProfile } from '@/lib/haccp-routine-repository';
+import { loadHaccpProfileForEntry, readHaccpProfileSnapshot } from '@/lib/haccp-routine-repository';
 import { haccpDocumentSummary, sortHaccpRows } from '@/lib/haccp-sheet';
 import { haccpIdentityStamp, localTimeKey } from '@/lib/haccp-today';
 import type { HaccpDocument, HaccpDocumentRow, HaccpValues } from '@/types/haccp';
@@ -108,23 +108,62 @@ export default function HaccpFormScreen() {
   const { t, locale } = useI18n();
   const userId = auth.user?.id ?? 'demo';
   const identity = auth.user?.email ?? 'Operator';
-  const { documents, isLoading, save, remove } = useHaccpDocuments(userId);
-  const [profile, setProfile] = useState(() => defaultHaccpProfile(identity));
-  const [draft, setDraft] = useState<HaccpDocument | null>(null);
+  const { documents, isLoading, syncError, refresh, save, remove } = useHaccpDocuments(userId);
+  const [profileState, setProfileState] = useState<{ userId: string; profile: HaccpRoutineProfile | null; error: boolean }>(() => ({ userId, profile: null, error: false }));
+  const profile = profileState.userId === userId ? profileState.profile : null;
+  const [storedDraft, setDraft] = useState<HaccpDocument | null>(null);
+  const [draftOwner, setDraftOwner] = useState(userId);
+  const draft = draftOwner === userId ? storedDraft : null;
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [rowDraft, setRowDraft] = useState<HaccpValues>({});
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const scope = useRef({ userId, generation: 0 });
+  const profileGeneration = useRef(0);
+  const draftGeneration = useRef(0);
+
+  useLayoutEffect(() => {
+    scope.current = { userId, generation: scope.current.generation + 1 };
+    profileGeneration.current++;
+    draftGeneration.current++;
+    setDraft(null);
+    setIsSaving(false);
+    setIsExporting(false);
+    return () => { scope.current.generation++; };
+  }, [userId]);
 
   const formDocuments = useMemo(
-    () => form ? documents.filter((item) => item.formCode === form.code && haccpLocationMatches(item, profile)) : [],
+    () => form && profile ? documents.filter((item) => item.formCode === form.code && haccpLocationMatches(item, profile)) : [],
+    [documents, form, profile],
+  );
+  const unassignedDocuments = useMemo(
+    () => form && profile ? documents.filter(item => item.formCode === form.code
+      && !item.headerValues._location_id?.trim() && !haccpLocationMatches(item, profile)) : [],
     [documents, form, profile],
   );
   const pendingDishNames = draft?.rows.filter((row) => row.values._name_pending === 'true').length ?? 0;
 
-  useEffect(() => {
-    void loadHaccpProfile(userId, identity).then(setProfile).catch(() => undefined);
+  const loadProfile = useCallback(async () => {
+    const ownerGeneration = scope.current.generation;
+    const request = ++profileGeneration.current;
+    const isCurrent = () => scope.current.userId === userId && scope.current.generation === ownerGeneration
+      && profileGeneration.current === request;
+    setProfileState(current => current.userId === userId ? { ...current, error: false } : { userId, profile: null, error: false });
+    try {
+      const cached = await readHaccpProfileSnapshot(userId);
+      if (!isCurrent()) return;
+      if (cached) setProfileState({ userId, profile: cached, error: false });
+      const loaded = await loadHaccpProfileForEntry(userId, identity);
+      if (isCurrent()) setProfileState({ userId, profile: loaded, error: false });
+    } catch {
+      if (isCurrent()) setProfileState(current => ({ ...current, error: true }));
+    }
   }, [identity, userId]);
+
+  useEffect(() => {
+    void loadProfile();
+  }, [loadProfile]);
 
   if (!form) {
     return (
@@ -141,14 +180,28 @@ export default function HaccpFormScreen() {
   };
 
   const startNew = () => {
+    if (!profile || scope.current.userId !== userId) return;
+    profileGeneration.current++; // Keep the displayed scope stable once editing starts.
+    draftGeneration.current++;
+    setDraftOwner(userId);
+    setHasUnsavedChanges(true);
     setDraft(newDocument(form.code, form.documentFields, profile));
     resetRow();
   };
 
   const openDocument = (document: HaccpDocument) => {
+    if (!profile || scope.current.userId !== userId) return;
+    profileGeneration.current++;
+    draftGeneration.current++;
+    setDraftOwner(userId);
+    setHasUnsavedChanges(false);
     const copied = copyDocument(document);
+    const defaults = initialHeaderValues(form.documentFields, profile);
+    // Opening an existing/legacy form must never assign it to the currently selected location.
+    delete defaults._location_id;
+    delete defaults._location_name;
     copied.headerValues = {
-      ...initialHeaderValues(form.documentFields, profile),
+      ...defaults,
       ...copied.headerValues,
     };
     setDraft(copied);
@@ -156,6 +209,8 @@ export default function HaccpFormScreen() {
   };
 
   const setHeaderValue = (key: string, value: string) => {
+    draftGeneration.current++;
+    setHasUnsavedChanges(true);
     setDraft((current) => current ? { ...current, headerValues: { ...current.headerValues, [key]: value } } : current);
   };
 
@@ -269,6 +324,8 @@ export default function HaccpFormScreen() {
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
+    draftGeneration.current++;
+    setHasUnsavedChanges(true);
     setDraft({
       ...draft,
       rows: sortHaccpRows([row, ...draft.rows.filter((item) => item.id !== row.id)], form),
@@ -283,6 +340,8 @@ export default function HaccpFormScreen() {
 
   const deleteRow = (rowId: string) => {
     if (!draft) return;
+    draftGeneration.current++;
+    setHasUnsavedChanges(true);
     setDraft({ ...draft, rows: draft.rows.filter((row) => row.id !== rowId) });
     if (editingRowId === rowId) resetRow();
   };
@@ -302,13 +361,20 @@ export default function HaccpFormScreen() {
   };
 
   const persist = async (notify = true) => {
-    if (!draft || !validateDraft()) return null;
+    if (!draft || !profile || scope.current.userId !== userId || !validateDraft()) return null;
+    const ownerGeneration = scope.current.generation;
+    const generation = draftGeneration.current;
+    const isCurrent = () => scope.current.userId === userId && scope.current.generation === ownerGeneration
+      && draftGeneration.current === generation;
     setIsSaving(true);
     try {
       const result = await save({ ...draft, headerValues: { ...draft.headerValues,
         _header_confirmed_at: new Date().toISOString(), _header_confirmed_by: identity } });
+      if (!isCurrent()) return null;
       setDraft(result.document);
+      setHasUnsavedChanges(false);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (!isCurrent()) return null;
       void syncHaccpReminders(
         userId,
         [result.document, ...documents.filter((item) => item.id !== result.document.id)],
@@ -322,10 +388,10 @@ export default function HaccpFormScreen() {
       }
       return result.document;
     } catch (error) {
-      Alert.alert(t('haccp.saveFailed'), error instanceof Error ? error.message : t('common.tryAgain'));
+      if (isCurrent()) Alert.alert(t('haccp.saveFailed'), error instanceof Error ? error.message : t('common.tryAgain'));
       return null;
     } finally {
-      setIsSaving(false);
+      if (scope.current.userId === userId && scope.current.generation === ownerGeneration) setIsSaving(false);
     }
   };
 
@@ -361,6 +427,19 @@ export default function HaccpFormScreen() {
     ]);
   };
 
+  const documentCard = (document: HaccpDocument) => (
+    <View key={document.id} style={styles.documentCard}>
+      <View style={styles.documentIcon}><Ionicons name="document-text-outline" size={20} color={Brand.navy} /></View>
+      <Pressable onPress={() => openDocument(document)} style={({ pressed }) => [styles.flex, pressed && styles.pressed]}>
+        <Text style={styles.documentTitle}>{haccpDocumentSummary(document, form, locale)}</Text>
+        <Text style={styles.documentMeta}>{t('haccp.entriesAndDate', { count: document.rows.length, date: new Date(document.updatedAt).toLocaleDateString(locale === 'ro' ? 'ro-RO' : 'en-GB') })}</Text>
+        {document.syncState !== 'synced' && <Text style={styles.pending}>{t('haccp.waitingForSync')}</Text>}
+      </Pressable>
+      <IconButton icon="download-outline" label={t('haccp.exportPdf')} onPress={() => void exportPdf(document)} />
+      <IconButton icon="trash-outline" label={t('common.delete')} danger onPress={() => confirmDelete(document)} />
+    </View>
+  );
+
   if (!draft) {
     return (
       <Screen>
@@ -368,23 +447,34 @@ export default function HaccpFormScreen() {
         <Card tone="navy">
           <SectionHeader eyebrow={form.code} title={localize(form.shortTitle, locale)} light />
           <Body light>{form.instructions ? localize(form.instructions, locale) : t('haccp.formIntro')}</Body>
-          <AppButton label={t('haccp.newDocument')} icon="add" fullWidth onPress={startNew} />
+          <AppButton label={t('haccp.newDocument')} icon="add" fullWidth disabled={!profile} onPress={startNew} />
         </Card>
 
+        {profileState.userId === userId && profileState.error ? (
+          <Card tone="gold">
+            <Body>{locale === 'ro'
+              ? 'Locația formularului nu a putut fi încărcată. Datele salvate au fost păstrate. Reîncearcă încărcarea locației.'
+              : 'The form location could not be loaded. Saved data has been preserved. Retry loading the location.'}</Body>
+            <AppButton label={locale === 'ro' ? 'Reîncearcă încărcarea locației' : 'Retry loading location'} onPress={() => void loadProfile()} />
+          </Card>
+        ) : !profile && <Body>{locale === 'ro' ? 'Se încarcă locația formularului…' : 'Loading form location…'}</Body>}
+
         <SectionHeader title={t('haccp.savedForms')} />
-        {!isLoading && !formDocuments.length && <Card tone="soft"><Body>{t('haccp.noDocuments')}</Body></Card>}
-        {formDocuments.map((document) => (
-          <View key={document.id} style={styles.documentCard}>
-            <View style={styles.documentIcon}><Ionicons name="document-text-outline" size={20} color={Brand.navy} /></View>
-            <Pressable onPress={() => openDocument(document)} style={({ pressed }) => [styles.flex, pressed && styles.pressed]}>
-              <Text style={styles.documentTitle}>{haccpDocumentSummary(document, form, locale)}</Text>
-              <Text style={styles.documentMeta}>{t('haccp.entriesAndDate', { count: document.rows.length, date: new Date(document.updatedAt).toLocaleDateString(locale === 'ro' ? 'ro-RO' : 'en-GB') })}</Text>
-              {document.syncState !== 'synced' && <Text style={styles.pending}>{t('haccp.waitingForSync')}</Text>}
-            </Pressable>
-            <IconButton icon="download-outline" label={t('haccp.exportPdf')} onPress={() => void exportPdf(document)} />
-            <IconButton icon="trash-outline" label={t('common.delete')} danger onPress={() => confirmDelete(document)} />
-          </View>
-        ))}
+        {syncError && <Card tone="gold">
+          <Body>{locale === 'ro'
+            ? 'Formularele salvate nu au putut fi încărcate sau actualizate. Datele existente au fost păstrate. Reîncearcă încărcarea.'
+            : 'Saved forms could not be loaded or refreshed. Existing data has been preserved. Try loading them again.'}</Body>
+          <AppButton label={t('common.retry')} onPress={() => void refresh()} />
+        </Card>}
+        {profile && !isLoading && !syncError && !formDocuments.length && <Card tone="soft"><Body>{t('haccp.noDocuments')}</Body></Card>}
+        {formDocuments.map(documentCard)}
+        {!!unassignedDocuments.length && <>
+          <SectionHeader title={locale === 'ro' ? 'Formulare salvate fără locație atribuită' : 'Unassigned saved forms'} />
+          <Body>{locale === 'ro'
+            ? 'Aceste formulare nu au un identificator de locație salvat. Le poți deschide și verifica; locația lor nu se schimbă automat.'
+            : 'These forms have no saved location ID. You can open and review them; their location is not changed automatically.'}</Body>
+          {unassignedDocuments.map(documentCard)}
+        </>}
       </Screen>
     );
   }
@@ -410,10 +500,10 @@ export default function HaccpFormScreen() {
       )}>
       <ToolHeader title={form.code} subtitle={localize(form.shortTitle, locale)} />
       <View style={styles.editTop}>
-        <AppButton label={t('haccp.backToDocuments')} icon="albums-outline" variant="ghost" onPress={() => setDraft(null)} />
+        <AppButton label={t('haccp.backToDocuments')} icon="albums-outline" variant="ghost" onPress={() => { draftGeneration.current++; setDraft(null); }} />
         <StatusPill
-          label={draft.syncState === 'synced' ? t('haccp.synced') : t('haccp.waitingForSync')}
-          status={draft.syncState === 'synced' ? 'healthy' : 'watch'}
+          label={hasUnsavedChanges ? t('offline.failedTitle') : draft.syncState === 'synced' ? t('haccp.synced') : t('haccp.waitingForSync')}
+          status={!hasUnsavedChanges && draft.syncState === 'synced' ? 'healthy' : 'watch'}
         />
       </View>
 

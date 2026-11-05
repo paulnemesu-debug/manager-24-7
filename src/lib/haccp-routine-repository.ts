@@ -253,9 +253,18 @@ async function syncProfile(userId: string, profile: HaccpRoutineProfile): Promis
   return profile;
 }
 
-async function loadHaccpProfileUnlocked(userId: string, identity: string): Promise<HaccpRoutineProfile> {
+/** Validated durable scope only: no lock, cloud request, writes or invented defaults. */
+export function readHaccpProfileSnapshot(userId: string): Promise<HaccpRoutineProfile | null> {
+  return readProfileCache(userId);
+}
+
+async function loadHaccpProfileUnlocked(userId: string, identity: string, requireVerifiedScope = false): Promise<HaccpRoutineProfile> {
   let cached = await readProfileCache(userId);
-  if (!canSync(userId) || !supabase) return cached ?? defaultHaccpProfile(identity);
+  const unavailable = () => new Error('HACCP location is unavailable. Retry loading the saved profile.');
+  if (!canSync(userId) || !supabase) {
+    if (requireVerifiedScope && !cached && userId !== 'demo') throw unavailable();
+    return cached ?? defaultHaccpProfile(identity);
+  }
   let acknowledged = false;
   if (cached !== null) {
     const replayed = await syncProfile(userId, cached);
@@ -274,10 +283,16 @@ async function loadHaccpProfileUnlocked(userId: string, identity: string): Promi
       .eq('user_id', userId)
       .maybeSingle();
   } catch {
+    if (requireVerifiedScope && !cached) throw unavailable();
     return cached ?? defaultHaccpProfile(identity);
   }
   const { data, error } = result;
-  if (error || !data) return cached ?? defaultHaccpProfile(identity);
+  if (error) {
+    if (requireVerifiedScope && !cached) throw unavailable();
+    return cached ?? defaultHaccpProfile(identity);
+  }
+  // A successful empty lookup is different from a failed request: this is a new profile.
+  if (!data) return cached ?? defaultHaccpProfile(identity);
   const remote: HaccpRoutineProfile = {
     defaultLocationId: data.default_location_id ? String(data.default_location_id) : null,
     defaultLocationName: String(data.default_location_name ?? ''),
@@ -293,6 +308,11 @@ async function loadHaccpProfileUnlocked(userId: string, identity: string): Promi
 
 export function loadHaccpProfile(userId: string, identity = ''): Promise<HaccpRoutineProfile> {
   return withStorageLock(profileKey(userId), () => loadHaccpProfileUnlocked(userId, identity));
+}
+
+/** Form entry must not silently assign a default location when the saved scope is unavailable. */
+export function loadHaccpProfileForEntry(userId: string, identity = ''): Promise<HaccpRoutineProfile> {
+  return withStorageLock(profileKey(userId), () => loadHaccpProfileUnlocked(userId, identity, true));
 }
 
 export function saveHaccpProfile(userId: string, source: HaccpRoutineProfile) {

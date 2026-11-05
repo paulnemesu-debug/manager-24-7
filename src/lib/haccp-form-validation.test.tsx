@@ -23,7 +23,10 @@ vi.mock('@/hooks/use-haccp-documents', () => ({ useHaccpDocuments: () => ({ docu
 vi.mock('@/lib/haccp-export', () => ({ exportHaccpDocumentPdf: vi.fn() }));
 vi.mock('@/lib/haccp-repository', () => ({ createHaccpDocumentId: () => 'new-document', createHaccpRowId: () => 'new-row' }));
 vi.mock('@/lib/haccp-reminders', () => ({ syncHaccpReminders: vi.fn() }));
-vi.mock('@/lib/haccp-routine-repository', () => ({ defaultHaccpProfile: () => ({ defaultLocationName: 'QA', defaultLocationId: null, responsibleName: 'Operator' }), loadHaccpProfile: async () => ({ defaultLocationName: 'QA', defaultLocationId: null, responsibleName: 'Operator' }) }));
+vi.mock('@/lib/haccp-routine-repository', () => ({
+  readHaccpProfileSnapshot: async () => ({ defaultLocationName: 'QA', defaultLocationId: null, responsibleName: 'Operator' }),
+  loadHaccpProfileForEntry: async () => ({ defaultLocationName: 'QA', defaultLocationId: null, responsibleName: 'Operator' }),
+}));
 
 import HaccpFormScreen from '@/app/tools/haccp/[code]';
 let tree: ReactTestRenderer | undefined;

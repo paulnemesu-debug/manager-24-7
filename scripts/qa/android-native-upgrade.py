@@ -879,6 +879,13 @@ def run(device, apk_dir, verified, result, offline_upgrade=False, continue_histo
     entry = {"emailCodeSubmitted": False, "homeConfirmed": False}
     result["entry"] = entry
     sign_in(device, email_field, email, code, f"QA Kitchen {suffix}", entry)
+    if offline_upgrade:
+        # Load the ordinary Account location before the first cold relaunch.
+        device.phase = "warm-location-cache"
+        device.tab(ACCOUNT)
+        device.folder(MY_ACCOUNT)
+        device.find(EDIT_LOCATION, scroll="both", seconds=60)
+        relaunch(device)
     device.phase = "create-recipe"
     create_recipe(device, title, ingredients)
     # Start from the app's normal entry point before going to another module.
@@ -954,12 +961,6 @@ def run(device, apk_dir, verified, result, offline_upgrade=False, continue_histo
                 checkpoint(68, "apk68-online-warm", "online")
                 result["checkpoints"][-1]["networkMode"] = "online-warm"
                 device.cache_probe("apk68-online-warm", equipment)
-            # Reading the existing location through its normal UI warms its persisted cache.
-            device.phase = "warm-location-cache"
-            relaunch(device)
-            device.tab(ACCOUNT)
-            device.folder(MY_ACCOUNT)
-            device.find(EDIT_LOCATION, scroll="both", seconds=60)
             device.phase = "disconnect-network"
             original_network = device.wait_connectivity(True)
             result["connectivityTransitions"] = [{"stage": "before-offline", **original_network}]
