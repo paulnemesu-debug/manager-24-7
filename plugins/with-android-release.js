@@ -29,6 +29,14 @@ module.exports = function withAndroidRelease(config) {
       permissions.push({ $: { 'android:name': 'android.permission.CAMERA' } });
     }
     mod.modResults.manifest['uses-permission'] = permissions;
+    // Scanning is optional. CAMERA otherwise implies required camera hardware
+    // (and autofocus) in Google Play's device filtering.
+    const optionalCameraFeatures = ['android.hardware.camera', 'android.hardware.camera.autofocus'];
+    const features = mod.modResults.manifest['uses-feature'] ?? [];
+    mod.modResults.manifest['uses-feature'] = [
+      ...features.filter(item => !optionalCameraFeatures.includes(item.$['android:name'])),
+      ...optionalCameraFeatures.map(name => ({ $: { 'android:name': name, 'android:required': 'false' } })),
+    ];
     return mod;
   });
   config = withGradleProperties(config, mod => {

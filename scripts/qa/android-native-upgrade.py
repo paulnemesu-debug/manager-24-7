@@ -259,6 +259,16 @@ def filtered_crashes(log, *, dropbox=False, include_messages=False):
     return evidence[-3:]
 
 
+def ime_window_state(dump):
+    """API30 retains input-view/request flags after the IME window is hidden."""
+    state = {}
+    for output, field in (("inputRequested", "mInputShown"), ("inputViewFlag", "mIsInputViewShown"),
+                          ("decorVisible", "mDecorViewVisible"), ("windowVisible", "mWindowVisible")):
+        values = set(re.findall(rb"\b" + field.encode() + rb"=(true|false)\b", dump))
+        state[output] = True if values == {b"true"} else False if values == {b"false"} else None
+    return state
+
+
 class Device:
     def __init__(self, adb, serial, evidence):
         self.command = [adb, "-s", serial]
@@ -378,7 +388,11 @@ class Device:
 
     def hide_keyboard(self):
         ime = self.adb("check keyboard visibility", "shell", "dumpsys", "input_method")
-        if b"mInputShown=true" in ime or b"mIsInputViewShown=true" in ime:
+        state = ime_window_state(ime)
+        # An extra BACK closes the app's FolderHub when the keyboard is already hidden.
+        back = state["decorVisible"] is True and state["windowVisible"] is True
+        self.last_keyboard_dismissal = {**state, "backSent": back}
+        if back:
             self.adb("dismiss the keyboard", "shell", "input", "keyevent", "KEYCODE_BACK")
 
     def type(self, node, value, *, keep_numeric_zero=False):
@@ -587,6 +601,7 @@ class Device:
                                        dropbox=True)
         diagnostic = {
             "phase": self.phase,
+            "lastKeyboardDismissal": getattr(self, "last_keyboard_dismissal", None),
             "focusedAppActivity": f"{PACKAGE}/{activity[1]}" if activity else "unavailable",
             "appProcessAlive": bool(re.fullmatch(r"\d+(?:\s+\d+)*", read("pidof", PACKAGE).strip())),
             "lastAppExitReasonCode": int(reason[1]) if reason else None,
