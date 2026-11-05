@@ -4,6 +4,7 @@ Only use on an isolated synthetic staging emulator after accepted APK70
 offline/online evidence. No login, API calls, private-storage reads or dispatch.
 """
 import argparse
+from contextlib import contextmanager
 import hashlib
 import importlib.util
 import json
@@ -141,22 +142,116 @@ def wait_installed(device, deadline, observations):
         except Exception:
             # Busy native install may temporarily prevent a hierarchy dump.
             nodes = []
+        observations.polls = getattr(observations,"polls",0)+1
+        observations.emptyPolls = getattr(observations,"emptyPolls",0)+(not nodes)
         if matching(nodes, READY) is not None:
             return
         for category, labels in SAFE_ERRORS:
             if any(node.get("text", "").startswith(labels) for node in nodes):
-                raise RuntimeError("Catalogue installer visible failure: " + category)
+                raise CatalogueInstallError(category)
         values = read_progress(nodes)
         if values and values != last:
             observations.append({"elapsedSeconds":round(time.monotonic() - observations.started, 2),
                                  "visibleProgress":values})
             last = values
         time.sleep(min(6, max(0, deadline - time.monotonic())))
-    raise RuntimeError("Native catalogue did not reach ready within the install budget")
+    raise CatalogueInstallError("timeout")
 
 
 class Progress(list):
     pass
+
+
+class CatalogueInstallError(RuntimeError):
+    def __init__(self, category):
+        self.category = category if category in ("timeout","storage","checksum","network","load") else "unclassified"
+        super().__init__("The native catalogue installation was not confirmed")
+
+
+def track_installation(device, deadline, result):
+    progress = Progress()
+    progress.started = time.monotonic()
+    result["installationProgress"] = progress
+    result["installationBudgetSeconds"] = INSTALL_SECONDS
+    try:
+        wait_installed(device, min(time.monotonic()+INSTALL_SECONDS, deadline-140), progress)
+    finally:
+        result["installationPollSummary"] = {"polls":getattr(progress,"polls",0),
+            "emptyHierarchyPolls":getattr(progress,"emptyPolls",0),
+            "seconds":round(time.monotonic()-progress.started,3)}
+    return progress
+
+
+def screen_timeout(device):
+    value = device.adb("read isolated emulator display timeout", "shell", "settings", "get", "system", "screen_off_timeout", timeout=5).decode().strip()
+    require(re.fullmatch(r"\d{1,10}",value) is not None and 1000 <= int(value) <= 2_147_483_647,
+            "The original display timeout must be a bounded numeric setting")
+    return int(value)
+
+
+def power_display_state(device):
+    raw = device.adb("inspect bounded display wake state", "shell", "dumpsys", "power", timeout=5).decode(errors="replace")
+    wake = re.search(r"\bmWakefulness=(Awake|Asleep|Dreaming|Dozing)\b",raw)
+    display = re.search(r"\bDisplay Power: state=(ON|OFF|DOZE|DOZE_SUSPEND)\b",raw)
+    return {"wakefulness":wake[1] if wake else "unavailable", "display":display[1] if display else "unavailable"}
+
+
+@contextmanager
+def keep_emulator_awake(device, result):
+    for prop in ("ro.kernel.qemu","ro.debuggable"):
+        require(device.adb("verify disposable emulator before display setting", "shell", "getprop", prop, timeout=5).strip()==b"1",
+                "The display guard is restricted to the disposable debuggable emulator")
+    previous = screen_timeout(device)
+    guard = {"previousTimeoutMillis":previous,"temporaryTimeoutMillis":1_800_000,"restored":False}
+    result["emulatorWakeGuard"] = guard
+    try:
+        device.adb("keep only the isolated emulator display awake", "shell", "settings", "put", "system", "screen_off_timeout", "1800000", timeout=5)
+        device.adb("wake only the isolated emulator display", "shell", "input", "keyevent", "KEYCODE_WAKEUP", timeout=5)
+        require(screen_timeout(device)==1_800_000,"The emulator display timeout did not change")
+        guard["afterWake"] = power_display_state(device)
+        require(guard["afterWake"]["wakefulness"]=="Awake","The isolated emulator display is not awake")
+        yield guard
+    finally:
+        try:
+            guard["beforeRestore"] = power_display_state(device)
+        except Exception:
+            guard["beforeRestore"] = "unavailable"
+        device.adb("restore the exact prior emulator display timeout", "shell", "settings", "put", "system", "screen_off_timeout", str(previous), timeout=5)
+        guard["restored"] = screen_timeout(device)==previous
+        require(guard["restored"],"The emulator display timeout was not restored")
+
+
+def runtime_evidence(device, base, *, include_crashes=True):
+    """Read app-scoped state into memory; retain no raw logs, messages, intents or URLs."""
+    def read(*command):
+        try:
+            return device.adb("inspect isolated catalogue runtime", "shell", *command, timeout=5).decode(errors="replace")
+        except Exception:
+            return ""
+    activities = read("dumpsys","activity","activities")
+    focus = "unavailable"
+    packages = (PACKAGE,"android","com.android.launcher3","com.google.android.apps.nexuslauncher","com.android.permissioncontroller","com.google.android.permissioncontroller")
+    for line in activities.splitlines():
+        match = re.search(r"\s([A-Za-z][\w.]*)/([A-Za-z0-9_.$]+)",line) if "ResumedActivity" in line else None
+        if match and match[1] in packages:
+            focus = f"{match[1]}/{match[2]}"
+            break
+    exits = read("dumpsys","activity","exit-info",PACKAGE)
+    codes = re.findall(r"\breason=(\d{1,2})\b",exits)[:32]
+    anr = read("dumpsys","activity","lastanr")
+    result = {"appProcessAlive":bool(re.fullmatch(r"\d+(?:\s+\d+)*",read("pidof",PACKAGE).strip())),
+        "focusedActivity":focus, "exitReasonCounts":{code:codes.count(code) for code in sorted(set(codes))},
+        "anrRecordedForApp":bool(re.search(rf"(?m)^\s*ANR in {re.escape(PACKAGE)}(?:\s|$)",anr))}
+    try:
+        result["powerDisplay"] = power_display_state(device)
+    except Exception:
+        result["powerDisplay"] = "unavailable"
+    if include_crashes:
+        crashes = base.filtered_crashes(read("logcat","-b","crash","-d","-v","raw","-t","300"))
+        if not crashes:
+            crashes = base.filtered_crashes(read("dumpsys","dropbox","--print","data_app_crash"),dropbox=True)
+        result["appCrashes"] = crashes
+    return result
 
 
 def verify_detail_offline(device, base, deadline, result):
@@ -294,12 +389,12 @@ def main():
         find(device, START, deadline)
         device.phase = "foodcom-before-download-evidence"
         public_screenshot(device, "foodcom-native-before-download")
-        device.click(START, scroll="both", seconds=min(40, remaining(deadline)))
-        device.phase = "foodcom-download-install"
-        progress = Progress()
-        progress.started = started
-        wait_installed(device, min(time.monotonic()+INSTALL_SECONDS, deadline-140), progress)
-        result["installationProgress"] = progress
+        result["runtimeBeforeInstall"] = runtime_evidence(device,base,include_crashes=False)
+        device.phase = "foodcom-install-awake-preflight"
+        with keep_emulator_awake(device,result):
+            device.click(START, scroll="both", seconds=min(40, remaining(deadline)))
+            device.phase = "foodcom-download-install"
+            progress = track_installation(device,deadline,result)
         find(device, SUBTITLE, deadline)
         device.phase = "foodcom-installed-evidence"
         public_screenshot(device, "foodcom-native-installed")
@@ -315,7 +410,13 @@ def main():
         # Retain only stage/class, never arbitrary exception text, intents or hierarchy dumps.
         result["failureClass"] = type(error).__name__
         result["failureStage"] = device.phase if device else "preflight"
+        if isinstance(error,CatalogueInstallError):
+            result["installationFailureCategory"] = error.category
         if device is not None:
+            try:
+                result["runtimeAtFailure"] = runtime_evidence(device,base)
+            except Exception:
+                result["runtimeDiagnosticUnavailable"] = True
             try:
                 result["failureNavigation"] = failure_navigation_evidence(device,args.fixture_title,fixture_verified)
             except Exception:

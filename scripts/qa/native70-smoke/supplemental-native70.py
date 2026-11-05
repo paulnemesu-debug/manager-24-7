@@ -29,9 +29,11 @@ SYSTEM_TEXT = frozenset((SHARE_TARGET, "QA PDF saved", "QA PDF sink ready", "Reo
     "QA PDF saved and reopened", "QA PDF rendered page 1", "Share", "Share with", "Sharing",
     "Complete action using", "Just once", "Always", "Files", "Recent", "Images", "Browse",
     "Downloads", "Documents", "Photos", "Open from", "Select", "Allow", "Deny", "Don't allow",
-    "While using the app", IMAGE_NAME))
+    "While using the app", "Show roots", "Open navigation drawer", "Pictures", "Manager247-QA", IMAGE_NAME))
 CONTROL_NAMES = frozenset(("QA PDF Save sharesheet target", "native PDF receiver saved confirmation",
     "reopen saved PDF button", "Android PdfRenderer reopen confirmation", "permission or picker control",
+    "native PDF receiver initial readiness", "gallery navigation drawer", "gallery Images root",
+    "gallery Pictures directory", "gallery Manager247-QA directory",
     "synthetic gallery image qa-native-image.png", "emulated camera shutter",
     "camera result acceptance", "Expo image crop acceptance"))
 
@@ -45,7 +47,7 @@ class NativeControlError(RuntimeError):
 def system_failure_evidence(device, title):
     """Bounded known-system metadata only. Unknown text or input prevents screenshots."""
     result = {"screenshotCaptured": False, "controls": [], "focusedActivity": "unavailable"}
-    if device.phase not in ("supplemental-pdf-share", "supplemental-pdf-reopen", "supplemental-gallery-picker"):
+    if device.phase not in ("supplemental-pdf-receiver-prepare", "supplemental-pdf-share", "supplemental-pdf-reopen", "supplemental-gallery-picker"):
         return result
     try:
         activity = device.adb("inspect known native UI focus", "shell", "dumpsys", "activity", "activities").decode(errors="replace")
@@ -125,16 +127,48 @@ def receiver_nodes(device):
     return [node for node in device.visible_hierarchy() if node.get("package") == SINK]
 
 
-def pdf_smoke(device, base, title, evidence):
+def prepare_receiver(device):
+    device.phase = "supplemental-pdf-receiver-prepare"
+    if not device.adb("check the reviewed local PDF recipient", "shell", "pm", "path", SINK).startswith(b"package:"):
+        raise RuntimeError("The reviewed QA PDF receiver is not installed")
+    device.adb("initialize the local PDF recipient", "shell", "am", "start", "-W", "-a",
+               "android.intent.action.MAIN", "-n", f"{SINK}/.PdfReceiverActivity")
+    system_find(device, lambda nodes: select(nodes, labels=("QA PDF sink ready",), packages=(SINK,)),
+                "native PDF receiver initial readiness", seconds=15)
+    resolution = device.adb("verify the exact local PDF send recipient", "shell", "cmd", "package",
+        "query-activities", "--brief", "-a", "android.intent.action.SEND", "-c",
+        "android.intent.category.DEFAULT", "-t", "application/pdf", "-p", SINK).decode(errors="replace")
+    if not re.search(rf"(?m)^\s*{re.escape(SINK)}/(?:\.|{re.escape(SINK)}\.)PdfReceiverActivity\s*$", resolution):
+        raise RuntimeError("The exact local PDF recipient does not resolve application/pdf SEND")
+    return {"ready":True, "pdfSendResolverVerified":True, "package":SINK}
+
+
+def find_share_target(device):
+    choose = lambda nodes: select(nodes, labels=(SHARE_TARGET, "QA PDF saved"),
+        packages=("android", "com.android.intentresolver", "com.google.android.intentresolver", SINK))
+    for attempt in range(3):
+        try:
+            return system_find(device, choose, "QA PDF Save sharesheet target", seconds=8)
+        except NativeControlError:
+            if attempt == 2:
+                raise
+            focus = device.adb("verify Android chooser before expanding", "shell", "dumpsys", "activity", "activities").decode(errors="replace")
+            if not any("ResumedActivity" in line and "android/com.android.internal.app.ChooserActivity" in line for line in focus.splitlines()):
+                raise
+            device.adb("expand only the verified Android sharesheet", "shell", "input", "swipe",
+                str(device.width//2), str(int(device.height*.88)), str(device.width//2), str(int(device.height*.32)), "450")
+
+
+def pdf_smoke(device, base, title, evidence, observations=None):
+    recipient = prepare_receiver(device)
+    if observations is not None:
+        observations["recipientPreflight"] = recipient
+    open_fixture(device, base, title)
     device.phase = "supplemental-pdf-export"
-    installed = device.adb("check the reviewed local PDF recipient", "shell", "pm", "path", SINK)
-    base.require(installed.startswith(b"package:"), "The reviewed QA PDF receiver is not installed")
     device.click(COMPLIANCE, scroll="both")
     device.click(DOWNLOAD_PDF, scroll="both")
     device.phase = "supplemental-pdf-share"
-    choice = system_find(device, lambda nodes: select(nodes, labels=(SHARE_TARGET, "QA PDF saved"),
-        packages=("android", "com.android.intentresolver", "com.google.android.intentresolver", SINK)),
-        "QA PDF Save sharesheet target")
+    choice = find_share_target(device)
     if choice.get("package") != SINK:
         device.tap(choice)
     system_find(device, lambda nodes: select(nodes, labels=("QA PDF saved",), packages=(SINK,)),
@@ -167,7 +201,8 @@ def pdf_smoke(device, base, title, evidence):
                  "The reopened public PDF bytes do not match the native save checksum")
     return {"generatedThroughApp": True, "sharedToLocalReceiver": True, "savedToDownloads": True,
             "reopenedAfterReceiverColdStart": True, "nativePageCount": pages,
-            "sha256": sha, "bytes": len(content), "file": saved.name, "visualPageReviewRequired": True}
+            "sha256": sha, "bytes": len(content), "file": saved.name, "visualPageReviewRequired": True,
+            "recipientPreflight":recipient}
 
 
 def permission_or_control(device, labels=(), ids=(), packages=(), description="permission or picker control"):
@@ -199,17 +234,58 @@ def seed_image(device, evidence):
     device.adb("push the synthetic gallery image", "push", str(image), remote)
     device.adb("scan the synthetic gallery image", "shell", "am", "broadcast", "-a",
                "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d", "file://" + remote)
-    return hashlib.sha256(image.read_bytes()).hexdigest()
+    expected = hashlib.sha256(image.read_bytes()).hexdigest()
+    actual = device.adb("verify only the synthetic gallery seed bytes", "shell", "sha256sum", remote).decode().split()
+    if not actual or actual[0] != expected:
+        raise RuntimeError("Synthetic gallery seed checksum mismatch")
+    deadline = time.monotonic()+20
+    while time.monotonic() < deadline:
+        indexed = device.adb("verify only the synthetic image media index", "shell",
+            "content query --uri content://media/external/images/media --projection _display_name:mime_type "
+            "--where \"_display_name='qa-native-image.png'\"").decode(errors="replace")
+        if "_display_name=qa-native-image.png" in indexed and "mime_type=image/png" in indexed:
+            return expected
+        time.sleep(1)
+    raise RuntimeError("Synthetic gallery seed is absent from the native media index")
 
 
-def photo_smoke(device, base, title, evidence, mode):
+def gallery_seed_control(device):
+    packages = ("com.android.documentsui", "com.google.android.documentsui", "com.android.providers.media.module", "com.google.android.providers.media.module")
+    control = permission_or_control(device, labels=(IMAGE_NAME,"Show roots","Open navigation drawer"),
+        packages=packages, description="gallery navigation drawer")
+    if control.get("text", "").strip() == IMAGE_NAME or control.get("content-desc", "").strip() == IMAGE_NAME:
+        return control
+    device.tap(control)
+    root = system_find(device, lambda nodes: select(nodes, labels=("Images",), packages=packages), "gallery Images root", seconds=15)
+    device.tap(root)
+    system_find(device, lambda nodes: select(nodes, labels=(IMAGE_NAME,"Manager247-QA","Pictures"), packages=packages),
+        "gallery Pictures directory", seconds=15)
+    nodes = device.visible_hierarchy()
+    direct = select(nodes, labels=(IMAGE_NAME,), packages=packages)
+    if direct is not None:
+        return direct
+    folder = select(nodes, labels=("Manager247-QA",), packages=packages)
+    if folder is None:
+        pictures = system_find(device, lambda nodes: select(nodes, labels=("Pictures",), packages=packages), "gallery Pictures directory", seconds=15)
+        device.tap(pictures)
+        folder = system_find(device, lambda nodes: select(nodes, labels=("Manager247-QA",), packages=packages), "gallery Manager247-QA directory", seconds=15)
+    device.tap(folder)
+    return system_find(device, lambda nodes: select(nodes, labels=(IMAGE_NAME,), packages=packages),
+        "synthetic gallery image qa-native-image.png", seconds=15)
+
+
+def photo_smoke(device, base, title, evidence, mode, observations=None):
     device.phase = f"supplemental-{mode}-picker"
     device.click(INGREDIENTS_TAB, scroll="both")
     if mode == "gallery":
+        device.phase = "supplemental-gallery-seed"
         fixture_sha = seed_image(device, evidence)
+        if observations is not None:
+            observations["gallerySeed"] = {"sha256":fixture_sha,"deviceBytesVerified":True,
+                "mediaIndexVerified":True,"relativePath":"Pictures/Manager247-QA/"+IMAGE_NAME}
+        device.phase = "supplemental-gallery-picker"
         device.click(GALLERY, scroll="both")
-        picked = permission_or_control(device, labels=(IMAGE_NAME,), description="synthetic gallery image qa-native-image.png",
-            packages=("com.android.documentsui", "com.google.android.documentsui", "com.android.providers.media.module", "com.google.android.providers.media.module"))
+        picked = gallery_seed_control(device)
         device.tap(picked)
     else:
         cameras = device.adb("read emulated camera availability", "shell", "dumpsys", "media.camera").decode()
@@ -289,8 +365,8 @@ def main():
         base.require(all(installed[key] == final[key] for key in ("uid", "firstInstallTime")),
                      "The installed package differs from the accepted offline test")
         open_fixture(device, base, title)
-        result["result"] = (pdf_smoke(device, base, title, args.evidence) if args.mode == "pdf"
-                            else photo_smoke(device, base, title, args.evidence, args.mode))
+        result["result"] = (pdf_smoke(device, base, title, args.evidence, result) if args.mode == "pdf"
+                            else photo_smoke(device, base, title, args.evidence, args.mode, result))
         result.update(status="passed", recipe=title, evidenceClass=identity["evidenceClass"])
     except Exception as error:
         result["failureClass"] = type(error).__name__
