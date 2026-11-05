@@ -1,0 +1,181 @@
+name: Android staging upgrade QA
+
+on:
+  workflow_dispatch:
+    inputs:
+      apk70_sha256:
+        description: Optional verified SHA-256 of the finished staging APK 70
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-staging-upgrade-qa
+  cancel-in-progress: false
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      ANDROID_SERIAL: emulator-5554
+      APK70_SHA256: ${{ inputs.apk70_sha256 }}
+
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Check runner and download exact staging builds
+        shell: bash
+        env:
+          APK68_URL: ${{ secrets.QA_APK68_URL }}
+          APK69_URL: ${{ secrets.QA_APK69_URL }}
+          APK70_URL: ${{ secrets.QA_APK70_URL }}
+        run: |
+          set -euo pipefail
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/android-qa-avd"
+          export QA_APK_DIR="$RUNNER_TEMP/android-qa-apks"
+          export QA_EVIDENCE="$RUNNER_TEMP/android-qa-evidence"
+          printf '%s\n' "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" "QA_APK_DIR=$QA_APK_DIR" \
+            "QA_EVIDENCE=$QA_EVIDENCE" >> "$GITHUB_ENV"
+          if [[ ! -c /dev/kvm ]]; then
+            echo 'This runner does not expose /dev/kvm.' >&2
+            exit 1
+          fi
+          if [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then
+            sudo setfacl -m "u:$(id -un):rw" /dev/kvm
+          fi
+          if [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then
+            echo 'The runner user cannot access /dev/kvm.' >&2
+            exit 1
+          fi
+          if [[ -n "$APK70_SHA256" && ! "$APK70_SHA256" =~ ^[A-Fa-f0-9]{64}$ ]]; then
+            echo 'The optional APK 70 SHA-256 must contain 64 hexadecimal characters.' >&2
+            exit 1
+          fi
+          mkdir -p "$QA_APK_DIR" "$QA_EVIDENCE"
+          download_apk() {
+            local version="$1" url="$2"
+            if [[ "$url" != https://* ]]; then
+              echo "A protected HTTPS artifact URL is required for APK $version." >&2
+              return 1
+            fi
+            if ! curl --silent --fail --location --proto '=https' --proto-redir '=https' \
+                --connect-timeout 20 --max-time 120 --retry 2 \
+                --output "$QA_APK_DIR/apk$version.apk" -- "$url" 2>/dev/null; then
+              echo "APK $version could not be downloaded." >&2
+              return 1
+            fi
+          }
+          download_apk 68 "$APK68_URL"
+          download_apk 69 "$APK69_URL"
+          if [[ -n "$APK70_SHA256" ]]; then
+            download_apk 70 "$APK70_URL"
+          fi
+
+      - name: Prepare pinned Android emulator and verify the APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager_path="$(command -v sdkmanager || true)"
+          if [[ -z "$sdkmanager_path" ]]; then
+            sdkmanager_path="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          fi
+          build_tools="$ANDROID_HOME/build-tools/36.0.0"
+          system_image="$ANDROID_HOME/system-images/android-30/google_apis/x86_64"
+          if [[ ! -f "$system_image/system.img" || ! -x "$build_tools/apksigner" ]]; then
+            if ! "$sdkmanager_path" 'system-images;android-30;google_apis;x86_64' \
+                'build-tools;36.0.0' </dev/null; then
+              echo 'SDK package installation failed. Check the runner Android SDK and existing license acceptance.' >&2
+              exit 1
+            fi
+          fi
+          if [[ ! -f "$system_image/system.img" || ! -x "$build_tools/apksigner" ]] ||
+             ! grep -Eq '^Pkg\.Revision=16[[:space:]]*$' "$system_image/source.properties"; then
+            echo 'Android 11 Google APIs x86_64 system image revision 16 and build-tools 36.0.0 are required.' >&2
+            exit 1
+          fi
+
+          python3 scripts/qa/android-native-upgrade-verify.py \
+            --apk-dir "$QA_APK_DIR" --aapt "$build_tools/aapt" --apksigner "$build_tools/apksigner" \
+            --apk70-sha256 "$APK70_SHA256" --output "$QA_EVIDENCE/verified-apks.json"
+
+          archive="$RUNNER_TEMP/android-emulator-37.1.11.zip"
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+            --retry 2 --connect-timeout 20 --max-time 240 --output "$archive" \
+            https://dl.google.com/android/repository/emulator-linux_x64-15917651.zip
+          printf '%s  %s\n' '95771e0ae431897b2a4bd2d97fa095f29a8b0624a7b216baf529f9306161c266' "$archive" |
+            sha256sum --check
+          mkdir -p "$RUNNER_TEMP/android-qa-emulator" "$ANDROID_AVD_HOME"
+          unzip -q "$archive" -d "$RUNNER_TEMP/android-qa-emulator"
+          emulator="$RUNNER_TEMP/android-qa-emulator/emulator/emulator"
+          "$emulator" -accel-check | tee "$QA_EVIDENCE/acceleration.txt"
+          grep -Eq 'KVM.*(installed|usable)' "$QA_EVIDENCE/acceleration.txt"
+          printf 'no\n' | "$(dirname "$sdkmanager_path")/avdmanager" create avd \
+            --name manager247_qa --package 'system-images;android-30;google_apis;x86_64' --device pixel_3a
+
+      - name: Boot Android and run the staging upgrade
+        shell: bash
+        env:
+          QA_STAGING_EMAIL: ${{ secrets.QA_STAGING_EMAIL }}
+          QA_STAGING_OTP: ${{ secrets.QA_STAGING_OTP }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$QA_STAGING_EMAIL" || ! "$QA_STAGING_OTP" =~ ^[0-9]{6,10}$ ]]; then
+            echo 'A synthetic staging owner email and a fresh OTP are required.' >&2
+            exit 1
+          fi
+          emulator="$RUNNER_TEMP/android-qa-emulator/emulator/emulator"
+          adb="$ANDROID_HOME/platform-tools/adb"
+          "$emulator" -avd manager247_qa -port 5554 -accel on -gpu swiftshader \
+            -no-window -no-snapshot -no-boot-anim -no-audio -camera-back none -camera-front none \
+            >"$RUNNER_TEMP/android-qa-emulator.log" 2>&1 &
+          emulator_pid=$!
+          trap 'timeout 10 "$adb" -s "$ANDROID_SERIAL" emu kill >/dev/null 2>&1 || true; kill "$emulator_pid" 2>/dev/null || true' EXIT
+          booted=false
+          for ((attempt=0; attempt<90; attempt++)); do
+            if ! kill -0 "$emulator_pid" 2>/dev/null; then
+              break
+            fi
+            if [[ "$(timeout 3 "$adb" -s "$ANDROID_SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)" == 1 ]]; then
+              booted=true
+              break
+            fi
+            sleep 2
+          done
+          if [[ "$booted" != true ]]; then
+            echo 'The emulator did not finish booting.' >&2
+            exit 1
+          fi
+          abi_list="$("$adb" shell getprop ro.product.cpu.abilist | tr -d '\r')"
+          native_bridge="$("$adb" shell getprop ro.dalvik.vm.native.bridge | tr -d '\r')"
+          android_api="$("$adb" shell getprop ro.build.version.sdk | tr -d '\r')"
+          if [[ ",$abi_list," != *,arm64-v8a,* || -z "$native_bridge" || "$native_bridge" == 0 || "$android_api" != 30 ]]; then
+            echo 'Android did not advertise the expected API 30 ARM64 translation support.' >&2
+            exit 1
+          fi
+          printf 'api=%s\nabi=%s\nnativeBridge=%s\n' "$android_api" "$abi_list" "$native_bridge" >"$QA_EVIDENCE/emulator.txt"
+          "$adb" shell settings put global window_animation_scale 0
+          "$adb" shell settings put global transition_animation_scale 0
+          "$adb" shell settings put global animator_duration_scale 0
+          "$adb" shell wm dismiss-keyguard
+          python3 scripts/qa/android-native-upgrade.py \
+            --adb "$adb" --apk-dir "$QA_APK_DIR" --evidence "$QA_EVIDENCE"
+
+      - name: Upload synthetic QA checkpoints
+        if: ${{ always() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: android-staging-upgrade-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/android-qa-evidence/*.json
+            ${{ runner.temp }}/android-qa-evidence/*.png
+            ${{ runner.temp }}/android-qa-evidence/apk*-recipe.mp4
+            ${{ runner.temp }}/android-qa-evidence/acceleration.txt
+            ${{ runner.temp }}/android-qa-evidence/emulator.txt
+          if-no-files-found: ignore
+          retention-days: 2
