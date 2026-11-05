@@ -127,7 +127,8 @@ def filtered_crashes(log, *, dropbox=False, include_messages=False):
         java_frames = []
         for line in record:
             exception = exception_pattern.fullmatch(line)
-            if exception and exception[2].endswith(("Exception", "Error", "Throwable")):
+            # R8 may rename throwable classes to names without an Error or Exception suffix.
+            if exception:
                 role = {"Caused by": "cause", "Suppressed": "suppressed"}.get(exception[1], "root")
                 item = {"role": role, "exceptionClass": exception[2]}
                 if include_messages and exception[3]:
