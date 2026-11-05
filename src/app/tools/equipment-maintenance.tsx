@@ -12,6 +12,8 @@ import {
   emptyMaintenance,
   loadEquipmentRegistry,
   loadMaintenance,
+  readEquipmentRegistrySnapshot,
+  readMaintenanceSnapshot,
   maintenanceStatus,
   resolveEquipment,
   resolveMaintenance,
@@ -53,6 +55,7 @@ function EquipmentMaintenanceSession({ userId }: { userId: string }) {
   const { isViewer } = useSubscription();
   const l = (ro: string, en: string) => (locale === "ro" ? ro : en);
   const owner = useRef(userId);
+  const refreshGeneration = useRef(0);
   const busyAction = useRef(false);
   const [assets, setAssets] = useState<EquipmentAsset[]>([]);
   const [entries, setEntries] = useState<MaintenanceEntry[]>([]);
@@ -80,13 +83,26 @@ function EquipmentMaintenanceSession({ userId }: { userId: string }) {
   const [travel, setTravel] = useState("");
   const [consumables, setConsumables] = useState("");
   const refresh = async (id = userId) => {
-    const [a, m] = await Promise.all([
-      loadEquipmentRegistry(id),
-      loadMaintenance(id),
-    ]);
-    if (owner.current === id) {
-      setAssets(a);
-      setEntries(m);
+    const generation = ++refreshGeneration.current;
+    const isCurrent = () => owner.current === id && refreshGeneration.current === generation;
+    try {
+      const [cachedAssets, cachedEntries] = await Promise.all([
+        readEquipmentRegistrySnapshot(id),
+        readMaintenanceSnapshot(id),
+      ]);
+      if (!isCurrent()) return;
+      setAssets(cachedAssets);
+      setEntries(cachedEntries);
+      const [a, m] = await Promise.all([
+        loadEquipmentRegistry(id),
+        loadMaintenance(id),
+      ]);
+      if (isCurrent()) {
+        setAssets(a);
+        setEntries(m);
+      }
+    } catch (caught) {
+      if (isCurrent()) throw caught;
     }
   };
   useEffect(() => {
@@ -108,6 +124,8 @@ function EquipmentMaintenanceSession({ userId }: { userId: string }) {
   const run = async (fn: (id: string) => Promise<void>) => {
     const id = userId;
     if (busyAction.current) return;
+    // An older background refresh must not repaint over this newer action.
+    refreshGeneration.current++;
     busyAction.current = true;
     setBusy(true);
     setError("");

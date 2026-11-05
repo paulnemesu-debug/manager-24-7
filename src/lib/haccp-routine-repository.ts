@@ -189,6 +189,11 @@ export function listHaccpEquipment(userId: string): Promise<HaccpEquipment[]> {
   return withStorageLock(equipmentKey(userId), () => listHaccpEquipmentUnlocked(userId));
 }
 
+/** Existing durable registry only: no cloud lock, replay, default seeding or writes. */
+export async function readHaccpEquipmentRegistrySnapshot(userId: string): Promise<HaccpEquipment[]> {
+  return (await readEquipmentCache(userId) ?? []).sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
 /** Maintenance retains deactivated assets and their identity without scheduling readings. */
 export function listHaccpEquipmentRegistry(userId: string): Promise<HaccpEquipment[]> {
   return withStorageLock(equipmentKey(userId), async () => {

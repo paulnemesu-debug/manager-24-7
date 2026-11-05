@@ -1,6 +1,6 @@
 import { withStorageLock } from '@/lib/storage-lock';
 import { createOperationalStore } from '@/lib/operational-sync';
-import { listHaccpEquipmentRegistry } from '@/lib/haccp-routine-repository';
+import { listHaccpEquipmentRegistry, readHaccpEquipmentRegistrySnapshot } from '@/lib/haccp-routine-repository';
 import { isIsoDate } from '@/lib/local-date-time';
 import type { HaccpEquipment } from '@/types/haccp-routine';
 import type { EquipmentAsset, MaintenanceEntry } from '@/types/equipment-maintenance';
@@ -56,6 +56,11 @@ export async function loadEquipmentRegistry(userId: string): Promise<EquipmentAs
     const [h, p] = await Promise.all([listHaccpEquipmentRegistry(userId), assets.load(userId)]);
     return mergeEquipmentRegistry(h, p);
 }
+export async function readEquipmentRegistrySnapshot(userId: string): Promise<EquipmentAsset[]> {
+    const [h, p] = await Promise.all([readHaccpEquipmentRegistrySnapshot(userId), assets.readSnapshot(userId)]);
+    return mergeEquipmentRegistry(h, p);
+}
+export const readMaintenanceSnapshot = entries.readSnapshot;
 export const loadMaintenance = entries.load;
 export const resolveEquipment = assets.resolve;
 export function resolveMaintenance(userId:string,id:string,choice:'local'|'remote') {

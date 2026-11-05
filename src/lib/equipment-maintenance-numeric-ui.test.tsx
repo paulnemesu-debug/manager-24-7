@@ -30,6 +30,10 @@ vi.mock("@/lib/operational-sync", () => ({
   operationalSyncLabel: () => "local",
 }));
 vi.mock("@/lib/equipment-maintenance", () => ({
+  readEquipmentRegistrySnapshot: async () => [
+    { id: "asset", name: "Oven", available: true },
+  ],
+  readMaintenanceSnapshot: async () => state.entries,
   loadEquipmentRegistry: async () => [
     { id: "asset", name: "Oven", available: true },
   ],

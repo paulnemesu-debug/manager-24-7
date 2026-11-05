@@ -99,6 +99,9 @@ export function createOperationalStore<T extends RecordBase>(options: {
   };
   const locked = <R>(userId: string, work: () => Promise<R>) => withStorageLock(options.key(userId), work);
   return {
+    // Display the last complete durable value without waiting behind cloud I/O.
+    // This validates only; writers, sync and conflict resolution keep their locks.
+    readSnapshot: (userId: string) => read(userId),
     cached: (userId: string) => locked(userId, () => read(userId)),
     load: (userId: string) => locked(userId, async () => sync(userId, await read(userId))),
     save: (userId: string, draft: T) => locked(userId, async () => {
