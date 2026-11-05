@@ -1,4 +1,5 @@
 import type { HrAttendanceStatus, HrEmployee, HrShift } from '@/types/hr';
+import { cloudRevisionTime } from '@/lib/cloud-revision-time';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -80,7 +81,10 @@ export function dedupeShiftsByEmployeeDay(shifts: readonly HrShift[]) {
   for (const shift of shifts) {
     const key = `${shift.employeeId}:${shift.workDate}`;
     const current = byDay.get(key);
-    if (!current || shift.updatedAt > current.updatedAt) byDay.set(key, shift);
+    const pending = shift.syncState === 'pending' || shift.syncState === 'local';
+    const currentPending = current?.syncState === 'pending' || current?.syncState === 'local';
+    if (!current || (pending && !currentPending)
+      || (pending === currentPending && (cloudRevisionTime(shift.updatedAt) ?? -1n) > (cloudRevisionTime(current.updatedAt) ?? -1n))) byDay.set(key, shift);
   }
   return [...byDay.values()].sort((left, right) => (
     right.workDate.localeCompare(left.workDate) || right.updatedAt.localeCompare(left.updatedAt)

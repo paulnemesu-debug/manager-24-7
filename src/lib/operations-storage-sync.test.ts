@@ -5,18 +5,37 @@ vi.mock('@react-native-async-storage/async-storage', () => ({ default: {
   getItem: async (key: string) => state.storage.get(key) ?? null,
   setItem: async (key: string, value: string) => { state.storage.set(key, value); },
 } }));
-vi.mock('@/lib/supabase', () => ({ isDemoMode: false, supabase: { from: () => ({
-  select: () => ({ eq: (_: string, user: string) => ({ eq: async (_: string, period: string) => ({
-    data: state.cloud.filter((row) => row.user_id === user && row.period_start === period), error: state.fail ? new Error('offline') : null,
-  }) }) }),
-  upsert: async (rows: Record<string, unknown>[]) => {
-    if (state.fail) return { error: new Error('offline') };
-    state.writes.push(rows);
-    rows.forEach(row => { state.cloud = state.cloud.filter(old => old.user_id !== row.user_id
-      || old.period_start !== row.period_start || old.recipe_id !== row.recipe_id); state.cloud.push(row); });
-    return { error: null };
+vi.mock('@/lib/supabase', () => ({ isDemoMode: false, supabase: {
+  auth: { getSession: async () => ({ data: { session: { user: { id: 'one' }, access_token: 'fixture-token-one' } }, error: null }) },
+  from: () => {
+    let operation = 'read'; let values: Record<string, unknown>[] = [];
+    const filters: [string, unknown][] = [];
+    const chain = {
+      select: () => chain, setHeader: () => chain, limit: () => chain,
+      eq: (key: string, value: unknown) => { filters.push([key,value]); return chain; },
+      in: (key: string, value: string[]) => { filters.push([key,value]); return chain; },
+      upsert: (input: Record<string, unknown>[]) => { operation='upsert'; values=input; return chain; },
+      insert: (input: Record<string, unknown>) => { operation='insert'; values=[input]; return chain; },
+      update: (input: Record<string, unknown>) => { operation='update'; values=[input]; return chain; },
+      then: (resolve: (value: unknown) => unknown, reject: (error: unknown) => unknown) => Promise.resolve().then(() => {
+        if (state.fail) return { error: new Error('offline'), data: null };
+        state.cloud = state.cloud.map(row => ({ source: 'manual', source_reference: null, updated_at: '2026-11-05T10:00:00.123456Z', ...row }));
+        const matches = (row: Record<string, unknown>) => filters.every(([key,value]) => Array.isArray(value) ? value.includes(row[key]) : row[key] === value);
+        if (operation === 'read') return { data: state.cloud.filter(matches), error: null };
+        state.writes.push(values);
+        const saved: Record<string, unknown>[] = [];
+        for (const value of values) {
+          const previous = state.cloud.find(row => operation === 'update' ? matches(row) : row.user_id === value.user_id && row.period_start === value.period_start && row.recipe_id === value.recipe_id);
+          if (operation === 'insert' && previous) return { error: { code: '23505' }, data: null };
+          if (operation === 'update' && !previous) continue;
+          const next = { ...previous, ...value, updated_at: '2026-11-05T10:01:00.123456Z' };
+          state.cloud = [...state.cloud.filter(row => row !== previous), next]; saved.push(next);
+        }
+        return { error: null, data: saved };
+      }).then(resolve,reject),
+    }; return chain;
   },
-}) } }));
+} }));
 import { loadSales, saveSales } from '@/lib/operations-storage';
 beforeEach(() => { state.storage.clear(); state.cloud = []; state.writes = []; state.fail = false; });
 describe('menu sales offline synchronization', () => {

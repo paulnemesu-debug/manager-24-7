@@ -76,6 +76,7 @@ export default function ConsumptionVouchersScreen() {
   const { isViewer } = useSubscription();
   const userId = auth.user?.id ?? 'demo';
   const [draft, setDraft] = useState<ConsumptionVoucherDraft>(() => emptyDraft());
+  const [numericInputs, setNumericInputs] = useState<Record<string, Partial<Record<'quantity' | 'purchasePrice', string>>>>({});
   const [documents, setDocuments] = useState<ConsumptionVoucher[]>([]);
   const [historyLimit, setHistoryLimit] = useState(8);
   const [selectedCatalogId, setSelectedCatalogId] = useState<string | null>(null);
@@ -109,6 +110,19 @@ export default function ConsumptionVouchersScreen() {
       )),
     }));
   };
+
+  const numericText = (line: OperationalLine, key: 'quantity' | 'purchasePrice') => (
+    numericInputs[line.id]?.[key] ?? (key === 'quantity' && !line[key] ? '' : String(line[key]))
+  );
+  const updateNumericLine = (line: OperationalLine, key: 'quantity' | 'purchasePrice', value: string) => {
+    setNumericInputs(current => ({ ...current, [line.id]: { ...current[line.id], [key]: value } }));
+    const parsed = number(value);
+    updateLine(line.id, { [key]: Number.isFinite(parsed) ? parsed : 0 });
+  };
+  const hasInvalidNumbers = draft.lines.some(line => (
+    !Number.isFinite(number(numericText(line, 'quantity'))) || number(numericText(line, 'quantity')) <= 0
+    || !Number.isFinite(number(numericText(line, 'purchasePrice')))
+  ));
 
   const addCatalogLine = (catalogId: string | null) => {
     setSelectedCatalogId(catalogId);
@@ -198,14 +212,23 @@ export default function ConsumptionVouchersScreen() {
       lines: preview.lines,
     }));
     setPreview(null);
+    setNumericInputs({});
   };
 
   const save = async () => {
-    const lines = draft.lines.filter((line) => line.name.trim() && line.quantity > 0);
-    if (!lines.length) {
+    if (!draft.lines.length) {
       Alert.alert(t('voucher.noLinesTitle'), t('voucher.noLinesBody'));
       return;
     }
+    if (hasInvalidNumbers || draft.lines.some(line => !line.name.trim())) {
+      Alert.alert(t('voucher.noLinesTitle'), locale === 'ro'
+        ? 'Completează fiecare ingredient cu denumire, cantitate mai mare decât zero și preț valid (zero sau pozitiv). Corectează sau șterge rândurile incomplete.'
+        : 'Complete every ingredient with a name, a quantity greater than zero and a valid price (zero or positive). Correct or remove incomplete rows.');
+      return;
+    }
+    const lines = draft.lines.map(line => recalculateOperationalLine({
+      ...line, quantity: number(numericText(line, 'quantity')), purchasePrice: number(numericText(line, 'purchasePrice')),
+    }));
     setBusy(true);
     try {
       const saved = await saveConsumptionVoucher(userId, {
@@ -214,6 +237,7 @@ export default function ConsumptionVouchersScreen() {
         lines,
       });
       setDraft(asDraft(saved));
+      setNumericInputs({});
       setDocuments((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
       Alert.alert(
         t('voucher.savedTitle'),
@@ -238,7 +262,7 @@ export default function ConsumptionVouchersScreen() {
         <View style={styles.actions}>
           <AppButton label={t('voucher.scan')} icon="camera-outline" variant="secondary" loading={busy && !preview} onPress={() => void scanPhoto()} />
           <AppButton label={t('voucher.import')} icon="document-attach-outline" variant="secondary" loading={busy && !preview} onPress={() => void pickFile()} />
-          <AppButton label={t('voucher.new')} icon="add" variant="ghost" onPress={() => { setDraft(emptyDraft()); setPreview(null); setSelectedCatalogId(null); router.setParams({ id: undefined }); }} />
+          <AppButton label={t('voucher.new')} icon="add" variant="ghost" onPress={() => { setDraft(emptyDraft()); setNumericInputs({}); setPreview(null); setSelectedCatalogId(null); router.setParams({ id: undefined }); }} />
         </View>
       </Card>
 
@@ -254,6 +278,22 @@ export default function ConsumptionVouchersScreen() {
             <View key={line.id} style={styles.previewRow}>
               <Text style={styles.lineName}>{line.name}</Text>
               <Text style={styles.money}>{format.money(line.cost)}</Text>
+            </View>
+          ))}
+          {preview.unresolved.map((row) => (
+            <View key={`rejected-${row.rowNumber}`} style={styles.previewRow}>
+              <View style={styles.field}>
+                <Text style={styles.lineName}>{locale === 'ro' ? 'Rând' : 'Row'} {row.rowNumber}: {row.name || (locale === 'ro' ? 'Fără denumire' : 'Missing name')}</Text>
+                <Body>{row.issues.map(issue => ({
+                  missing_name: locale === 'ro' ? 'Lipsește denumirea' : 'Name is missing',
+                  invalid_quantity: locale === 'ro' ? 'Cantitatea trebuie să fie un număr mai mare decât zero' : 'Quantity must be a number greater than zero',
+                  invalid_unit: locale === 'ro' ? 'Unitate de măsură nerecunoscută' : 'Unit is not recognized',
+                  invalid_price: locale === 'ro' ? 'Prețul trebuie să fie un număr pozitiv sau zero' : 'Price must be a positive number or zero',
+                  missing_unit: locale === 'ro' ? 'Lipsește unitatea de măsură' : 'Unit is missing',
+                  missing_price: locale === 'ro' ? 'Lipsește prețul' : 'Price is missing',
+                  incompatible_unit: locale === 'ro' ? 'Unitatea nu corespunde unității prețului din catalog' : 'Unit is incompatible with the catalog price unit',
+                })[issue]).join('; ')}</Body>
+              </View>
             </View>
           ))}
           <View style={styles.actions}>
@@ -296,7 +336,7 @@ export default function ConsumptionVouchersScreen() {
             </View>
             <Field label={t('voucher.ingredient')} value={line.name} onChangeText={(name) => updateLine(line.id, { name })} />
             <View style={styles.fieldsRow}>
-              <Field style={styles.field} label={t('voucher.quantity')} keyboardType="decimal-pad" value={line.quantity ? String(line.quantity) : ''} onChangeText={(value) => updateLine(line.id, { quantity: number(value) })} />
+              <Field style={styles.field} label={t('voucher.quantity')} keyboardType="decimal-pad" value={numericText(line, 'quantity')} onChangeText={(value) => updateNumericLine(line, 'quantity', value)} />
               <View style={styles.field}>
                 <Select
                   label={t('voucher.unit')}
@@ -309,14 +349,14 @@ export default function ConsumptionVouchersScreen() {
                   })}
                 />
               </View>
-              <Field style={styles.field} label={t('voucher.unitPrice')} keyboardType="decimal-pad" value={line.purchasePrice ? String(line.purchasePrice) : ''} onChangeText={(value) => updateLine(line.id, { purchasePrice: number(value) })} />
+              <Field style={styles.field} label={t('voucher.unitPrice')} keyboardType="decimal-pad" value={numericText(line, 'purchasePrice')} onChangeText={(value) => updateNumericLine(line, 'purchasePrice', value)} />
             </View>
-            <Text style={styles.lineCost}>{t('voucher.lineCost')}: {format.money(line.cost)}</Text>
+            <Text style={styles.lineCost}>{t('voucher.lineCost')}: {Number.isFinite(number(numericText(line, 'quantity'))) && number(numericText(line, 'quantity')) > 0 && Number.isFinite(number(numericText(line, 'purchasePrice'))) ? format.money(line.cost) : '—'}</Text>
           </View>
         ))}
         <View style={styles.totalRow}>
           <Text style={styles.totalLabel}>{t('voucher.total')}</Text>
-          <Text style={styles.totalValue}>{format.money(total)}</Text>
+          <Text style={styles.totalValue}>{hasInvalidNumbers ? '—' : format.money(total)}</Text>
         </View>
       </Card>
 
@@ -329,6 +369,7 @@ export default function ConsumptionVouchersScreen() {
               accessibilityLabel={`${locale === 'ro' ? 'Deschide bonul' : 'Open stock issue'} ${item.reference}`}
               onPress={() => {
                 setDraft(asDraft(item));
+                setNumericInputs({});
                 setPreview(null);
                 setSelectedCatalogId(null);
                 router.setParams({ id: item.id });
@@ -351,7 +392,10 @@ export default function ConsumptionVouchersScreen() {
 }
 
 function number(value: string) {
-  return Math.max(0, Number(value.replace(',', '.').replace(/[^0-9.]/g, '')) || 0);
+  const normalized = value.trim().replace(',', '.');
+  if (!/^\d+(?:\.\d+)?$/.test(normalized)) return NaN;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : NaN;
 }
 
 const styles = StyleSheet.create({

@@ -84,7 +84,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "qa:flows": "node scripts/qa/check-folders.cjs && node scripts/qa/check-draft-flows.cjs && node scripts/qa/check-auth-haccp.cjs && node scripts/qa/check-nutrition-flows.cjs && node scripts/qa/check-commercial-flows.cjs && node scripts/qa/check-operational-flows.cjs && node scripts/qa/check-operations-remediation.cjs",
-    "qa:database": "node scripts/qa/check-google-purchases.cjs && node scripts/qa/check-workspace-security.mjs && node scripts/qa/check-demo-ten-days.mjs && node scripts/qa/check-individual-trials.mjs && node --test tests/notify-trial-owner.test.mjs && node scripts/qa/check-equipment-production.mjs && node scripts/qa/check-recipe-create-receipts.mjs && node scripts/qa/check-catalog-supplier-offers.mjs",
+    "qa:database": "node scripts/qa/check-google-purchases.cjs && node scripts/qa/check-workspace-security.mjs && node scripts/qa/check-demo-ten-days.mjs && node scripts/qa/check-individual-trials.mjs && node --test tests/notify-trial-owner.test.mjs && node scripts/qa/check-equipment-production.mjs && node scripts/qa/check-recipe-create-receipts.mjs && node scripts/qa/check-catalog-supplier-offers.mjs && node scripts/qa/check-management-daily-snapshots.mjs && node scripts/qa/check-waste-revision-clocks.mjs",
     "qa:release": "npm run typecheck && npm run lint && npm test && npm run qa:flows && npm run qa:database",
     "qa:android-release": "node scripts/qa/check-android-release-artifact.cjs",
     "export:site-web": "node scripts/export-site-web.mjs"

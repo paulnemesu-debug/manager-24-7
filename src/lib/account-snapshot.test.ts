@@ -46,11 +46,14 @@ describe('complete account export', () => {
     state.cache.set('manager247.hr.v1.two', '{"secret":"other account"}');
     state.cache.set('manager247.recipe-drafts.v1.one', '[{"title":"draft"}]');
     state.cache.set('professional_foodcost.sales.2026-10-01.v1.one', '{"dish":50}');
+    state.cache.set('professional_foodcost.sales_acknowledged.2026-10-01.v1.one', '{"dish":{"portions":50,"updatedAt":"2026-11-05T10:00:00Z"}}');
+    state.cache.set('professional_foodcost.sales_acknowledged.2026-10-01.v1.two', '{"secret":"other account"}');
     state.cache.set('sb-project-auth-token', '{"refresh_token":"secret"}');
     state.cache.set('manager247.telemetry.queue.v1', '[{"secret":"global"}]');
     const result = await buildAccountSnapshot('one', [], []);
     expect(result.localModules.hr).toEqual({ employees: [{ id: 'employee' }] });
     expect(result.localModules['sales.2026-10-01']).toEqual({ dish: 50 });
+    expect(result.localModules['salesAcknowledged.2026-10-01']).toEqual({ dish: { portions: 50, updatedAt: '2026-11-05T10:00:00Z' } });
     expect(JSON.stringify(result)).not.toContain('secret');
     expect(accountLocalModule('manager247.hr.v1.other-one', 'one')).toBeNull();
     expect(result.manifest.cloudComplete).toBe(true);

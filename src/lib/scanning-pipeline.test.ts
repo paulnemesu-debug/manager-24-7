@@ -32,6 +32,29 @@ it('rejects invalid AI output instead of inventing ingredient rows', async () =>
   state.result = { rows: [{ name: 'Fără date' }] }; await expect(scanInvoiceDocument('blob:x', 'image/jpeg')).rejects.toThrow('scan_empty');
   await expect(scanConsumptionDocument('blob:x')).rejects.toThrow('scan_empty');
 });
+it.each([
+  { quantity: 2 },
+  { name: '  ', quantity: 2 },
+  { name: 'Unt' },
+  { name: 'Unt', quantity: 0 },
+  { name: 'Unt', quantity: -2 },
+  { name: 'Unt', quantity: 'invalid' },
+])('rejects a scan with no usable named quantity: %j', async (row) => {
+  state.result = { rows: [row] };
+  await expect(scanConsumptionDocument('blob:x')).rejects.toThrow('scan_empty');
+});
+it('retains invalid rows for review when a scan also contains a usable row', async () => {
+  state.result = { rows: [
+    { name: 'Unt', quantity: 2, unit: 'kg', unitPrice: 40 },
+    { name: 'Lapte', quantity: -1, unit: 'l', unitPrice: 9 },
+    { name: 'Fără cantitate' },
+  ] };
+  const rows = await scanConsumptionDocument('blob:x');
+  expect(rows).toHaveLength(3);
+  expect(rows[0]).toMatchObject({ name: 'Unt', quantity: 2 });
+  expect(rows[1]).toMatchObject({ name: 'Lapte', quantity: null, raw: { quantity: '-1' }, issues: ['invalid_quantity'] });
+  expect(rows[2]).toMatchObject({ name: 'Fără cantitate', quantity: null });
+});
 it('rejects unsupported document types before making a paid API call', async () => {
   await expect(scanInvoiceDocument('data:text/plain;base64,AQID', 'text/plain')).rejects.toThrow('invoice_type_invalid'); expect(state.calls).toHaveLength(0);
 });

@@ -9,6 +9,7 @@ const node = type => props => e(type, props, props.children, type === 'Screen' ?
 const t = (key, values) => load('@/i18n/translations').translate('en', key, values);
 const catalog = [{ id: 'milk', name: 'QA Milk', purchasePrice: 8, priceUnit: 'l', defaultLossPercent: 0, supplier: 'QA', active: true, notes: null, allergens: [], updatedAt: '', offers: [] }];
 let recipes = [];
+let menuSales = {other:9};
 const mocks = {
   react: React,
   'react-native': { View: 'View', Text: 'Text', TextInput: 'TextInput', Switch:'Switch', Pressable: 'Pressable', Platform: { OS:'android', select:x=>x.android??x.default }, StyleSheet:{ create:x=>x }, Alert:{alert:(...x)=>alerts.push(x)} },
@@ -38,9 +39,9 @@ const mocks = {
   '@/lib/share-links':{shareOnWhatsApp:async()=>{},shareByEmail:async()=>{}},
   '@/lib/consumption-scan':{scanConsumptionDocument:async()=>{}},
   '@/lib/locations-repository':{listLocations:async()=>[]},
-  '@/lib/management-repository':{createManagementId:()=> 'count1',loadManagementSnapshots:async()=>managementSnapshots,saveInventoryCount:async(_,d)=>({...d,syncState:'pending'})},
+  '@/lib/management-repository':{createManagementId:()=> 'count1',loadManagementSnapshots:async()=>managementSnapshots,loadManagementDailySnapshots:async()=>managementSnapshots,saveInventoryCount:async(_,d)=>({...d,syncState:'pending'})},
   '@/lib/operations-control-repository':{loadOperationsControlData:async()=>({policies:[],orders:[],waste:[],schedules:[]}), saveStockPolicy:async()=>{},saveSupplierOrder:async()=>{},saveInventorySchedule:async(_,d)=>{writes.push({type:'schedule',draft:d});return {...d,id:'schedule1'};},saveWasteEntry:async(_,d)=>{writes.push({type:'waste',draft:d});return {...d,id:'waste1',value:d.quantity*d.unitCost};}},
-  '@/lib/operations-storage':{currentSalesPeriod:()=> '2026-10-01',loadSales:async()=>({other:9}),saveSales:async(_,d)=>writes.push({type:'sales',draft:d})},
+  '@/lib/operations-storage':{currentSalesPeriod:()=> '2026-10-01',loadSales:async()=>({...menuSales}),loadPendingSales:async()=>({}),saveSales:async(_,d)=>{writes.push({type:'sales',draft:d});menuSales={...menuSales,...d};}},
   '@/lib/production-documents-repository':{createProductionDocumentId:()=> 'issue1',syncConsumptionVouchers:async()=>deferVoucherLoad ? new Promise(resolve=>{finishVoucherLoad=resolve;}) : documents,saveConsumptionVoucher:async(_,d)=>{documents=[{...d,totalCost:d.lines.reduce((s,l)=>s+l.cost,0),syncState:'pending'}];return documents[0];}},
 };
 function load(name, importer){ name=resolveSourceName(name,importer,project);if(mocks[name])return mocks[name];if(!name.startsWith('@/'))return require(name);const stem=path.join(project,'src',name.slice(2));if(name.endsWith('.json'))return JSON.parse(fs.readFileSync(stem,'utf8'));return evaluateSource(sourceFile(stem),load,cache); }
@@ -61,9 +62,18 @@ async function check(id,fn){writes.length=0;alerts.length=0;params={};try{await 
  await check('OP16 history can reopen and edit existing manual issue',async()=>{documents=[{id:'saved',documentDate:'2026-10-19',reference:'QA history',notes:'original',source:'manual',sourceReference:null,lines:[{id:'line',catalogId:'milk',name:'QA Milk',quantity:.75,unit:'l',priceUnit:'l',purchasePrice:8,cost:6}],totalCost:6,syncState:'pending'}];await mount(load('@/app/tools/consumption-vouchers').default);await press(find('Pressable',n=>n.props.accessibilityLabel==='Open stock issue QA history')[0]);assert.equal(field('Quantity').props.value,'0.75');await change('Quantity','1.25');await press(button('Save stock issue'));assert.equal(documents[0].id,'saved');assert.equal(documents[0].totalCost,10);});
  await check('OP16 reopening history does not overwrite edits when sync finishes later',async()=>{params={};await mount(load('@/app/tools/consumption-vouchers').default);deferVoucherLoad=true;await press(find('Pressable',n=>n.props.accessibilityLabel==='Open stock issue QA history')[0]);await change('Quantity','2');await act(async()=>finishVoucherLoad(documents));assert.equal(field('Quantity').props.value,'2');});deferVoucherLoad=false;
  await check('OP16 older stock issues remain reachable from paginated history',async()=>{documents=Array.from({length:9},(_,i)=>({...documents[0],id:`history${i}`,reference:`History ${i}`}));params={};await mount(load('@/app/tools/consumption-vouchers').default);await press(button('Show more stock issues'));await press(find('Pressable',n=>n.props.accessibilityLabel==='Open stock issue History 8')[0]);assert.equal(field('Number / reference').props.value,'History 8');});
- await check('OP18 duplicate sales rows aggregate before applying',async()=>{await mount(load('@/app/tools/menu-engineering').default);await press(button('Import sales CSV/XLSX'));await press(button('Confirm and apply'));assert.equal(writes.find(x=>x.type==='sales')?.draft.dish,7.5);assert.equal(writes.find(x=>x.type==='sales')?.draft.other,9);});
+ await check('OP18 duplicate sales rows aggregate before applying',async()=>{await mount(load('@/app/tools/menu-engineering').default);await press(button('Import sales CSV/XLSX'));await press(button('Confirm and apply'));assert.equal(writes.find(x=>x.type==='sales')?.draft.dish,7.5);assert.equal(writes.find(x=>x.type==='sales')?.draft.other,undefined);assert.equal(menuSales.other,9);});
  await check('OP20 negative waste is rejected rather than made positive',async()=>{params={mode:'waste'};await mount(load('@/app/tools/operations-control').default);await change('Quantity','-0.25');await press(button('Add to register'));assert.equal(writes.length,0,'Negative quantity must not reach save');assert(alerts.length,'Validation feedback required');});
  await check('OP22 invalid monthly day is rejected before saving',async()=>{params={mode:'inventory'};await mount(load('@/app/tools/operations-control').default);await act(async()=>find('ChoiceRow',n=>n.props.label==='Frequency')[0].props.onChange('monthly'));await change('Day of the month (1–28)','31');await press(button('Save schedule'));assert.equal(writes.length,0,'Day31 must not be stored');assert(alerts.length,'Validation feedback required');});
- await check('Legacy pending management snapshot is visibly marked for reconciliation',async()=>{managementSnapshots=[{id:'legacy',date:'2026-10-18',inventory:[],sales:[],labor:[],syncState:'pending',syncIssue:'legacy_daily_requires_review'}];await mount(load('@/app/tools/management-control').default);assert(find('Body',n=>JSON.stringify(n.props.children).includes('Reconciliation required')).length,'Unresolved legacy data needs a clear visible reason');});
+ await check('Legacy pending management snapshot is visibly marked for reconciliation',async()=>{
+   managementSnapshots=[{
+     id:'legacy',date:'2026-10-18',locationId:null,kind:'daily',updatedAt:'2026-10-18T12:00:00Z',
+     inventory:[],sales:[{recipeId:'dish',name:'QA previous sale',quantity:2,revenue:40,theoreticalUnitCost:5}],labor:[],
+     syncState:'pending',syncIssue:'legacy_daily_requires_review',
+   }];
+   await mount(load('@/app/tools/management-control').default);
+   assert(find('Body',n=>JSON.stringify(n.props.children).includes('Reconciliation required')).length,'Unresolved legacy data needs a clear visible reason');
+   assert(find('Text',n=>JSON.stringify(n.props.children).includes('QA previous sale')).length,'Unresolved legacy data should remain visible');
+ });
  if(tree)await act(async()=>tree.unmount());console.error=old;const result={checks,passed:checks.filter(x=>x.status==='PASS').length,failed:checks.filter(x=>x.status==='FAIL').length};console.log(JSON.stringify(result,null,2));if(result.failed)process.exitCode=1;
 })().catch(error=>{console.error(error);process.exitCode=1;});

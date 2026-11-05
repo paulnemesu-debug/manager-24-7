@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({
   storage: new Map<string, string>(),
   failures: new Map<string, 'error' | 'throw'>(),
+  rows: new Map<string, Record<string, unknown>[]>(),
 }));
 
 vi.mock('@react-native-async-storage/async-storage', () => ({ default: {
@@ -20,24 +21,60 @@ function remoteResult(resource: string, data: unknown = []) {
 function query(table: string) {
   let write = false;
   let payload: unknown;
+  let operation = 'upsert';
+  const filters: [string, unknown][] = [];
+  const inclusions: [string, readonly unknown[]][] = [];
+  const matches = (row: Record<string, unknown>) => filters.every(([key, value]) => row[key] === value)
+    && inclusions.every(([key, values]) => values.includes(row[key]));
+  const prepareWrite = (value: unknown, kind: string) => {
+    write = true;
+    operation = kind;
+    const stamp = (row: unknown) => ({ ...(row as Record<string, unknown>), updated_at: '2026-10-01T00:00:00Z' });
+    payload = Array.isArray(value) ? value.map(stamp) : stamp(value);
+    return builder;
+  };
   const builder = {
     select: () => builder,
-    eq: () => builder,
+    eq: (key: string, value: unknown) => { filters.push([key, value]); return builder; },
+    in: (key: string, values: readonly unknown[]) => { inclusions.push([key, values]); return builder; },
+    setHeader: () => builder,
     order: () => builder,
     range: () => builder,
     limit: () => builder,
     single: () => builder,
-    upsert: (value: unknown) => { write = true; payload = value; return builder; },
+    upsert: (value: unknown) => prepareWrite(value, 'upsert'),
+    insert: (value: unknown) => prepareWrite(value, 'insert'),
+    update: (value: unknown) => prepareWrite(value, 'update'),
     then: (resolve: (value: unknown) => unknown, reject: (error: unknown) => unknown) => (
-      Promise.resolve().then(() => remoteResult(write ? `${table}:write` : table, write ? payload : [])).then(resolve, reject)
+      Promise.resolve().then(() => {
+        const rows = state.rows.get(table) ?? [];
+        if (!write) return remoteResult(table, rows.filter(matches));
+        const candidates = Array.isArray(payload) ? payload : [payload];
+        const result = remoteResult(`${table}:write`, operation === 'update' && !rows.some(matches) ? null : payload);
+        if (!result.error && result.data) {
+          state.rows.set(table, operation === 'update'
+            ? rows.map(row => matches(row) ? { ...row, ...(payload as Record<string, unknown>) } : row)
+            : [...rows.filter(row => !candidates.some(item => item.id === row.id)), ...candidates]);
+        }
+        return result;
+      }).then(resolve, reject)
     ),
   };
   return builder;
 }
 
 vi.mock('@/lib/supabase', () => ({ isDemoMode: false, isSupabaseConfigured: true, supabase: {
+  auth: { getSession: async () => ({ data: { session: { user: { id: 'payroll-loading' }, access_token: 'qa-payroll-token' } }, error: null }) },
   from: (table: string) => query(table),
-  rpc: async (name: string) => remoteResult(name),
+  rpc: (name: string) => {
+    const request = {
+      setHeader: () => request,
+      then: (resolve: (value: unknown) => unknown, reject: (error: unknown) => unknown) => (
+        Promise.resolve().then(() => remoteResult(name)).then(resolve, reject)
+      ),
+    };
+    return request;
+  },
 } }));
 
 import { loadHrData } from '@/lib/hr-repository';
@@ -61,7 +98,7 @@ const report: PnlReport = {
 const knownEmployees = { requireKnownEmployees: true };
 const knownReports = { requireKnownReports: true };
 
-beforeEach(() => { state.storage.clear(); state.failures.clear(); });
+beforeEach(() => { state.storage.clear(); state.failures.clear(); state.rows.clear(); });
 
 describe('strict HR payroll loading', () => {
   it.each(['hr_employees', 'hr_shifts', 'list_hr_deletions'])('rejects unknown payroll when %s cannot be read', async (resource) => {
@@ -177,8 +214,8 @@ describe('strict P&L report loading', () => {
     expect(state.storage.get(pnlKey)).toBe('[]');
   });
 
-  it('preserves a valid pending report when another cached entry is malformed', async () => {
-    state.storage.set(pnlKey, JSON.stringify([{ ...report, syncState: 'pending' }, null, {}]));
+  it('preserves and uploads a known-new pending report when another cached entry is malformed', async () => {
+    state.storage.set(pnlKey, JSON.stringify([{ ...report, syncState: 'pending', baseUpdatedAt: null }, null, {}]));
     expect(await syncPnlReports(userId, knownReports)).toEqual([expect.objectContaining({
       id: report.id, period: report.period, payrollCost: 4200, syncState: 'synced',
     })]);

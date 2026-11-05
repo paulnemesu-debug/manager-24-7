@@ -7,6 +7,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { withStorageLock } from '@/lib/storage-lock';
+import { cloudRevisionTime } from '@/lib/cloud-revision-time';
 
 import { EMPTY_PNL_INPUTS, normalizePnlPeriod } from '@/lib/pnl';
 import { OperationalError } from '@/lib/operational-sync';
@@ -38,6 +39,22 @@ type RemotePnlReport = {
 
 const cacheKey = (userId: string) => `manager247.pnl_reports.v1.${userId}`;
 const recoveryKey = (userId: string) => `manager247.pnl_reports.recovery.v1.${userId}`;
+const reportColumns = 'id,period,revenue_food,revenue_beverage,revenue_other,cogs_food,cogs_beverage,packaging_cost,payroll_cost,rent_cost,utilities_cost,delivery_commissions,marketing_cost,maintenance_cost,admin_software_cost,other_operating_cost,taxes_interest_depreciation,notes,created_at,updated_at';
+
+async function reportAuthorization(userId: string): Promise<string | null> {
+  try {
+    const { data, error } = await supabase!.auth.getSession();
+    return !error && data.session?.user.id === userId && data.session.access_token
+      ? `Bearer ${data.session.access_token}` : null;
+  } catch { return null; }
+}
+
+function validRemoteReport(value: unknown): value is RemotePnlReport {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as RemotePnlReport;
+  return typeof row.period === 'string' && /^\d{4}-(0[1-9]|1[0-2])-01$/.test(row.period)
+    && cloudRevisionTime(row.updated_at) !== null && isKnownPnlReport(fromRemote(row));
+}
 
 function createUuid() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (character) => {
@@ -164,11 +181,10 @@ function toRemote(userId: string, report: PnlReport) {
     taxes_interest_depreciation: report.taxesInterestDepreciation,
     notes: report.notes.trim() || null,
     created_at: report.createdAt,
-    updated_at: report.updatedAt,
   };
 }
 
-async function savePnlReportUnlocked(userId: string, draft: PnlReportDraft): Promise<PnlReport> {
+async function savePnlReportUnlocked(userId: string, draft: PnlReportDraft, capturedAuthorization?: string): Promise<PnlReport> {
   const now = new Date().toISOString();
   const current = await loadCachedPnlReports(userId);
   const existing = current.find((item) => item.id === draft.id || item.period === draft.period);
@@ -179,26 +195,55 @@ async function savePnlReportUnlocked(userId: string, draft: PnlReportDraft): Pro
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
     syncState: canUseCloud(userId) ? 'pending' : 'local',
+    baseUpdatedAt: existing ? existing.syncState === 'synced' ? existing.updatedAt : existing.baseUpdatedAt : null,
   };
   await replaceCached(userId, pending);
   if (!canUseCloud(userId) || !supabase) return pending;
+  const authorization = capturedAuthorization ?? await reportAuthorization(userId);
+  if (!authorization) return pending;
 
   const { data, error } = await supabase
     .from('pnl_reports')
     .upsert(toRemote(userId, pending), { onConflict: 'user_id,period' })
-    .select('id,period,revenue_food,revenue_beverage,revenue_other,cogs_food,cogs_beverage,packaging_cost,payroll_cost,rent_cost,utilities_cost,delivery_commissions,marketing_cost,maintenance_cost,admin_software_cost,other_operating_cost,taxes_interest_depreciation,notes,created_at,updated_at')
-    .single();
-  if (error || !data) return pending;
+    .select(reportColumns)
+    .single().setHeader('Authorization', authorization);
+  if (error || !validRemoteReport(data) || normalizePnlPeriod(data.period) !== pending.period) return pending;
   const synced = fromRemote(data as RemotePnlReport);
   await replaceCached(userId, synced);
   return synced;
 }
 
-async function syncPendingPnlReports(userId: string, reports: PnlReport[]) {
+async function syncPendingPnlReports(userId: string, reports: PnlReport[], authorization: string) {
   let local = reports;
   for (const report of local.filter((item) => item.syncState === 'pending')) {
-    const synced = await savePnlReportUnlocked(userId, report);
-    local = local.map((item) => item.id === report.id ? synced : item);
+    try {
+      const checked = await supabase!.from('pnl_reports').select(reportColumns)
+        .eq('user_id', userId).in('period', [`${report.period}-01`]).setHeader('Authorization', authorization);
+      if (checked.error || !Array.isArray(checked.data) || checked.data.length > 1 || !checked.data.every(validRemoteReport)) continue;
+      const cloud = checked.data[0] ? fromRemote(checked.data[0]) : null;
+      if (cloud && cloud.period !== report.period) continue;
+      const same = cloud && cloud.notes.trim() === report.notes.trim()
+        && Object.keys(EMPTY_PNL_INPUTS).every(key => cloud[key as keyof typeof EMPTY_PNL_INPUTS] === report[key as keyof typeof EMPTY_PNL_INPUTS]);
+      let acknowledged: PnlReport | null = same ? cloud : null;
+      if (!same) {
+        // A lost response can be followed by a newer edit on another device.
+        // Replay only the recorded base revision; unknown legacy conflicts stay local.
+        if (cloud && (!report.baseUpdatedAt || cloudRevisionTime(report.baseUpdatedAt) !== cloudRevisionTime(cloud.updatedAt))) continue;
+        if (!cloud && report.baseUpdatedAt !== null) continue;
+        const payload = toRemote(userId, { ...report, id: cloud?.id ?? report.id });
+        const write = cloud
+          ? supabase!.from('pnl_reports').update(payload).eq('user_id', userId).eq('id', cloud.id)
+            .eq('period', `${report.period}-01`).eq('updated_at', cloud.updatedAt)
+          : supabase!.from('pnl_reports').insert(payload);
+        const result = await write.select(reportColumns).single().setHeader('Authorization', authorization);
+        if (result.error || !validRemoteReport(result.data) || normalizePnlPeriod(result.data.period) !== report.period) continue;
+        acknowledged = fromRemote(result.data);
+      }
+      if (acknowledged) {
+        await replaceCached(userId, acknowledged);
+        local = local.map(item => item.period === report.period ? acknowledged! : item);
+      }
+    } catch { /* Preserve the original local intent for a later retry or explicit save. */ }
   }
   return local;
 }
@@ -210,15 +255,21 @@ async function syncPnlReportsUnlocked(userId: string, options: { requireKnownRep
   // Retain valid local intent, but an invalid collection is not a known offline snapshot.
   let local = needsRecovery ? cached.reports.filter(isKnownPnlReport) : cached.reports;
   if (!canUseCloud(userId) || !supabase) return local;
+  const authorization = await reportAuthorization(userId);
+  if (!authorization) {
+    if (options.requireKnownReports && !cached.known) throw new Error('P&L reports are unavailable without a valid local cache.');
+    return local;
+  }
   // Verify unknown data before uploads can replace the malformed source cache.
-  if (!needsRecovery) local = await syncPendingPnlReports(userId, local);
+  if (!needsRecovery) local = await syncPendingPnlReports(userId, local, authorization);
 
   const result = await supabase
     .from('pnl_reports')
-    .select('id,period,revenue_food,revenue_beverage,revenue_other,cogs_food,cogs_beverage,packaging_cost,payroll_cost,rent_cost,utilities_cost,delivery_commissions,marketing_cost,maintenance_cost,admin_software_cost,other_operating_cost,taxes_interest_depreciation,notes,created_at,updated_at')
+    .select(reportColumns)
     .eq('user_id', userId)
     .order('period', { ascending: false })
     .limit(36)
+    .setHeader('Authorization', authorization)
     .then((response) => response, (error: unknown) => {
       if (!options.requireKnownReports || !cached.known) throw error;
       return null;
@@ -230,14 +281,46 @@ async function syncPnlReportsUnlocked(userId: string, options: { requireKnownRep
     return local;
   }
 
-  const remote = (data as RemotePnlReport[]).map(fromRemote);
+  if (!Array.isArray(data) || !data.every(validRemoteReport)) {
+    if (options.requireKnownReports && !cached.known) throw new Error('P&L reports could not be verified.');
+    return local;
+  }
+  const remote = new Map(data.map(row => { const report = fromRemote(row); return [report.period, report]; }));
+  const missing = new Set<string>();
+  const periods = local.filter(item => item.syncState === 'synced' && (!remote.has(item.period)
+    || (cloudRevisionTime(remote.get(item.period)!.updatedAt) ?? -1n) < (cloudRevisionTime(item.updatedAt) ?? -1n)))
+    .map(item => `${item.period}-01`);
+  // The monthly list is capped at 36. Verify missing months explicitly before
+  // interpreting an omission as deletion, and never upload acknowledged cache.
+  for (let offset = 0; offset < periods.length; offset += 50) {
+    const batch = periods.slice(offset, offset + 50);
+    try {
+      const checked = await supabase.from('pnl_reports').select(reportColumns)
+        .eq('user_id', userId).in('period', batch).setHeader('Authorization', authorization);
+      if (checked.error || !Array.isArray(checked.data) || !checked.data.every(validRemoteReport)
+        || !checked.data.every(row => batch.includes(row.period))
+        || new Set(checked.data.map(row => row.period)).size !== checked.data.length) continue;
+      const verified = new Map(checked.data.map(row => { const report = fromRemote(row); return [report.period, report]; }));
+      for (const date of batch) {
+        const period = date.slice(0, 7);
+        const report = verified.get(period);
+        if (report) remote.set(period, report);
+        else { remote.delete(period); missing.add(period); }
+      }
+    } catch { /* A failed check cannot erase the acknowledged offline snapshot. */ }
+  }
+  for (const item of local.filter(item => item.syncState === 'synced')) {
+    if (missing.has(item.period)) continue;
+    const cloud = remote.get(item.period);
+    if (!cloud || (cloudRevisionTime(item.updatedAt) ?? -1n) > (cloudRevisionTime(cloud.updatedAt) ?? -1n)) remote.set(item.period, item);
+  }
   const unsynced = local.filter((item) => item.syncState !== 'synced');
   if (corrupted) await preserveRecoverySource(userId, cached.raw!);
   const merged = await writeCache(userId, [
     ...unsynced,
-    ...remote.filter((item) => !unsynced.some((localItem) => localItem.period === item.period)),
+    ...[...remote.values()].filter((item) => !unsynced.some((localItem) => localItem.period === item.period)),
   ]);
-  return needsRecovery ? syncPendingPnlReports(userId, merged) : merged;
+  return needsRecovery ? syncPendingPnlReports(userId, merged, authorization) : merged;
 }
 
 export const savePnlReport = (userId: string, draft: PnlReportDraft) =>

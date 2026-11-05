@@ -8,6 +8,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { withStorageLock } from '@/lib/storage-lock';
 import { OperationalError } from '@/lib/operational-sync';
+import { cloudRevisionTime as historyTime } from '@/lib/cloud-revision-time';
 
 import {
   calculateBulkBatchTotals,
@@ -25,6 +26,7 @@ import type {
 
 type RemoteVoucher = {
   id: string;
+  user_id?: string;
   document_date: string;
   reference: string;
   source: ConsumptionVoucher['source'];
@@ -38,6 +40,7 @@ type RemoteVoucher = {
 
 type RemoteBatch = {
   id: string;
+  user_id?: string;
   recipe_id: string | null;
   batch_date: string;
   title: string;
@@ -59,6 +62,126 @@ type RemoteBatch = {
 
 const voucherKey = (userId: string) => `professional_foodcost.consumption_vouchers.v1.${userId}`;
 const batchKey = (userId: string) => `professional_foodcost.bulk_batches.v1.${userId}`;
+const voucherColumns = 'id,user_id,document_date,reference,source,source_reference,notes,lines,total_cost,created_at,updated_at';
+const batchColumns = 'id,user_id,recipe_id,batch_date,title,source,source_reference,lines,final_weight_grams,portions,sale_price_gross,vat_percent,total_cost,portion_cost,cost_per_kg,food_cost_percent,notes,created_at,updated_at';
+
+type HistoryRecord = { id: string; updatedAt: string; syncState: 'local' | 'pending' | 'synced'; deletedAt: string | null; createOnly?: boolean };
+type RemoteHistory = { id: string; user_id?: string; updated_at: string; lines: OperationalLine[] };
+type ReplayRecord = HistoryRecord & { baseUpdatedAt?: string | null };
+type DocumentPayload = Record<string, unknown> & { lines: OperationalLine[] };
+const lineFields = ['id', 'catalogId', 'name', 'quantity', 'unit', 'purchasePrice', 'priceUnit', 'lossPercent', 'cost'] as const;
+
+function samePayload(left: DocumentPayload, right: DocumentPayload) {
+  return Object.keys(left).filter(key => key !== 'created_at' && key !== 'lines').every(key => left[key] === right[key])
+    && left.lines.length === right.lines.length
+    && left.lines.every((line, index) => lineFields.every(key => line[key] === right.lines[index][key]));
+}
+
+async function replayOrdinaryDocument<T extends ReplayRecord, R extends RemoteHistory>(
+  table: 'consumption_vouchers' | 'bulk_batches', columns: string, userId: string, authorization: string,
+  pending: T, toRemote: (userId: string, item: T) => DocumentPayload, fromRemote: (row: R) => T,
+): Promise<T> {
+  try {
+    const checked = await supabase!.from(table).select(columns).eq('user_id', userId)
+      .in('id', [pending.id]).limit(2).setHeader('Authorization', authorization);
+    if (checked.error || !Array.isArray(checked.data) || checked.data.length > 1) return pending;
+    const row = checked.data[0] as unknown as R | undefined;
+    if (row && (row.id !== pending.id || row.user_id !== userId || historyTime(row.updated_at) === null || !Array.isArray(row.lines))) return pending;
+    const cloud = row ? fromRemote(row) : undefined;
+    if (cloud && samePayload(toRemote(userId, cloud), toRemote(userId, pending))) {
+      return { ...cloud, ...(pending.createOnly ? { createOnly: true } : {}) };
+    }
+    if (cloud ? !pending.baseUpdatedAt || historyTime(pending.baseUpdatedAt) !== historyTime(cloud.updatedAt)
+      : pending.baseUpdatedAt !== null) return pending;
+    const payload = toRemote(userId, pending);
+    const write = cloud
+      ? supabase!.from(table).update(payload).eq('user_id', userId).eq('id', pending.id).eq('updated_at', cloud.updatedAt)
+      : supabase!.from(table).insert(payload);
+    const result = await write.select(columns).single().setHeader('Authorization', authorization);
+    const saved = result.data as unknown as R | null;
+    if (result.error || !saved || saved.id !== pending.id || saved.user_id !== userId
+      || historyTime(saved.updated_at) === null || !Array.isArray(saved.lines)) return pending;
+    return { ...fromRemote(saved), ...(pending.createOnly ? { createOnly: true } : {}) };
+  } catch { return pending; }
+}
+
+function voucherToRemote(userId: string, item: ConsumptionVoucher): DocumentPayload {
+  return {
+    id: item.id, user_id: userId, document_date: item.documentDate, reference: item.reference,
+    source: item.source, source_reference: item.sourceReference, notes: item.notes || null,
+    lines: item.lines, total_cost: item.totalCost, created_at: item.createdAt,
+  };
+}
+
+function batchToRemote(userId: string, item: BulkBatch): DocumentPayload {
+  return {
+    id: item.id, user_id: userId, recipe_id: item.recipeId, batch_date: item.batchDate, title: item.title,
+    source: item.source, source_reference: item.sourceReference, lines: item.lines,
+    final_weight_grams: item.finalWeightGrams, portions: item.portions, sale_price_gross: item.salePriceGross,
+    vat_percent: item.vatPercent, total_cost: item.totalCost, portion_cost: item.portionCost,
+    cost_per_kg: item.costPerKg, food_cost_percent: item.foodCostPercent, notes: item.notes || null,
+    created_at: item.createdAt,
+  };
+}
+
+async function reconcileHistory<T extends HistoryRecord, R extends RemoteHistory>(
+  table: 'consumption_vouchers' | 'bulk_batches',
+  columns: string,
+  userId: string,
+  authorization: string,
+  local: T[],
+  list: R[],
+  fromRemote: (row: R) => T,
+): Promise<T[]> {
+  const merged = new Map(local.map(item => [item.id, item]));
+  const validRow = (row: R) => row && typeof row.id === 'string' && row.user_id === userId
+    && typeof row.updated_at === 'string' && historyTime(row.updated_at) !== null && Array.isArray(row.lines);
+  const accept = (row: R) => {
+    const previous = merged.get(row.id);
+    if (previous?.deletedAt || (previous && previous.syncState !== 'synced')) return;
+    const previousTime = previous ? historyTime(previous.updatedAt) : null;
+    const incomingTime = historyTime(row.updated_at)!;
+    if (previous && (previousTime === null || incomingTime < previousTime)) return;
+    merged.set(row.id, { ...fromRemote(row), ...(previous?.createOnly ? { createOnly: true } : {}) });
+  };
+  const listed = new Map<string, R>();
+  for (const row of list) {
+    if (!validRow(row)) continue;
+    listed.set(row.id, row);
+    accept(row);
+  }
+  const omittedOrOlder = local.filter(item => {
+    if (item.deletedAt || item.syncState !== 'synced') return false;
+    const listedRow = listed.get(item.id);
+    const localTime = historyTime(item.updatedAt);
+    return !listedRow || localTime === null || historyTime(listedRow.updated_at)! < localTime;
+  });
+  for (let offset = 0; offset < omittedOrOlder.length; offset += 50) {
+    const ids = omittedOrOlder.slice(offset, offset + 50).map(item => item.id);
+    try {
+      const { data, error } = await supabase!.from(table).select(columns).eq('user_id', userId)
+        .in('id', ids).limit(50).setHeader('Authorization', authorization);
+      if (error || !Array.isArray(data)) continue;
+      const verified = data as unknown as R[];
+      if (verified.some(row => !validRow(row) || !ids.includes(row.id))
+        || new Set(verified.map(row => row.id)).size !== verified.length) continue;
+      for (const row of verified) accept(row);
+      const present = new Set(verified.map(row => row.id));
+      for (const id of ids) {
+        if (present.has(id)) continue;
+        const previous = merged.get(id)!;
+        if (previous.createOnly) {
+          merged.set(id, { ...previous, deletedAt: new Date().toISOString() });
+        } else {
+          merged.delete(id);
+        }
+      }
+    } catch {
+      // A failed verification is not evidence that an acknowledged document was deleted.
+    }
+  }
+  return [...merged.values()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
 
 function createUuid() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (character) => {
@@ -152,6 +275,7 @@ export const loadCachedBulkBatches = (userId: string) => (
 async function saveConsumptionVoucherUnlocked(
   userId: string,
   draft: ConsumptionVoucherDraft,
+  capturedAuthorization?: string,
 ): Promise<ConsumptionVoucher> {
   const now = new Date().toISOString();
   const cached = await loadCachedConsumptionVouchers(userId);
@@ -168,25 +292,18 @@ async function saveConsumptionVoucherUnlocked(
     updatedAt: now,
     syncState: canUseCloud(userId) ? 'pending' : 'local',
     deletedAt: null,
+    baseUpdatedAt: existing ? existing.syncState === 'synced' ? existing.updatedAt : existing.baseUpdatedAt : null,
+    ...(existing?.createOnly ? { createOnly: true } : {}),
   };
   if (existing?.deletedAt) throw new ProductionVoucherDeletedError();
   await replaceCache(voucherKey(userId), pending);
   if (!canUseCloud(userId) || !supabase) return pending;
-  const { error } = await supabase.from('consumption_vouchers').upsert({
-    id: pending.id,
-    user_id: userId,
-    document_date: pending.documentDate,
-    reference: pending.reference,
-    source: pending.source,
-    source_reference: pending.sourceReference,
-    notes: pending.notes || null,
-    lines: pending.lines,
-    total_cost: pending.totalCost,
-    created_at: pending.createdAt,
-    updated_at: pending.updatedAt,
-  }, { onConflict: 'id' });
-  if (error) return pending;
-  const synced = { ...pending, syncState: 'synced' as const };
+  const authorization = capturedAuthorization ?? await voucherAuthorization(userId);
+  if (!authorization) return pending;
+  const { data, error } = await supabase.from('consumption_vouchers').upsert(voucherToRemote(userId, pending), { onConflict: 'id' })
+    .select('updated_at').single().setHeader('Authorization', authorization);
+  if (error || typeof data?.updated_at !== 'string' || historyTime(data.updated_at) === null) return pending;
+  const synced = { ...pending, updatedAt: data.updated_at, syncState: 'synced' as const };
   await replaceCache(voucherKey(userId), synced);
   return synced;
 }
@@ -198,9 +315,11 @@ export class ProductionVoucherDeletedError extends Error {
 
 async function voucherAuthorization(userId: string): Promise<string | null> {
   if (!canUseCloud(userId) || !supabase) return null;
-  const { data, error } = await supabase.auth.getSession();
-  const session = data.session;
-  return !error && session?.user.id === userId && session.access_token ? `Bearer ${session.access_token}` : null;
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    const session = data.session;
+    return !error && session?.user.id === userId && session.access_token ? `Bearer ${session.access_token}` : null;
+  } catch { return null; }
 }
 
 async function replayCreateOnlyVoucher(userId: string, pending: ConsumptionVoucher): Promise<ConsumptionVoucher> {
@@ -245,10 +364,13 @@ export const createConsumptionVoucherOnce = (userId: string, draft: ConsumptionV
     return replayCreateOnlyVoucher(userId,pending);
   });
 
-async function saveBulkBatchUnlocked(userId: string, draft: BulkBatchDraft): Promise<BulkBatch> {
+async function saveBulkBatchUnlocked(userId: string, draft: BulkBatchDraft, capturedAuthorization?: string): Promise<BulkBatch> {
   const now = new Date().toISOString();
   const cached = await loadCachedBulkBatches(userId);
   const existing = cached.find((item) => item.id === draft.id);
+  if (existing?.deletedAt) {
+    throw new Error('Fișa de producție a fost ștearsă. / The bulk batch was deleted.');
+  }
   const lines = draft.lines.map(recalculateBulkOperationalLine);
   const totals = calculateBulkBatchTotals({ ...draft, lines });
   const pending: BulkBatch = {
@@ -259,32 +381,16 @@ async function saveBulkBatchUnlocked(userId: string, draft: BulkBatchDraft): Pro
     updatedAt: now,
     syncState: canUseCloud(userId) ? 'pending' : 'local',
     deletedAt: null,
+    baseUpdatedAt: existing ? existing.syncState === 'synced' ? existing.updatedAt : existing.baseUpdatedAt : null,
   };
   await replaceCache(batchKey(userId), pending);
   if (!canUseCloud(userId) || !supabase) return pending;
-  const { error } = await supabase.from('bulk_batches').upsert({
-    id: pending.id,
-    user_id: userId,
-    recipe_id: pending.recipeId,
-    batch_date: pending.batchDate,
-    title: pending.title,
-    source: pending.source,
-    source_reference: pending.sourceReference,
-    lines: pending.lines,
-    final_weight_grams: pending.finalWeightGrams,
-    portions: pending.portions,
-    sale_price_gross: pending.salePriceGross,
-    vat_percent: pending.vatPercent,
-    total_cost: pending.totalCost,
-    portion_cost: pending.portionCost,
-    cost_per_kg: pending.costPerKg,
-    food_cost_percent: pending.foodCostPercent,
-    notes: pending.notes || null,
-    created_at: pending.createdAt,
-    updated_at: pending.updatedAt,
-  }, { onConflict: 'id' });
-  if (error) return pending;
-  const synced = { ...pending, syncState: 'synced' as const };
+  const authorization = capturedAuthorization ?? await voucherAuthorization(userId);
+  if (!authorization) return pending;
+  const { data, error } = await supabase.from('bulk_batches').upsert(batchToRemote(userId, pending), { onConflict: 'id' })
+    .select('updated_at').single().setHeader('Authorization', authorization);
+  if (error || typeof data?.updated_at !== 'string' || historyTime(data.updated_at) === null) return pending;
+  const synced = { ...pending, updatedAt: data.updated_at, syncState: 'synced' as const };
   await replaceCache(batchKey(userId), synced);
   return synced;
 }
@@ -293,68 +399,52 @@ async function syncConsumptionVouchersUnlocked(userId: string): Promise<Consumpt
   let local = await loadCachedConsumptionVouchers(userId);
   const visible = () => local.filter(item=>!item.deletedAt);
   if (!canUseCloud(userId) || !supabase) return visible();
+  const authorization = await voucherAuthorization(userId);
+  if (!authorization) return visible();
   for (const item of local.filter(entry=>entry.syncState==='pending' && !entry.deletedAt)) {
-    if (item.createOnly) {
+    if (item.createOnly && item.baseUpdatedAt === undefined) {
       try { await replayCreateOnlyVoucher(userId,item); }
       catch(error) { if(!(error instanceof ProductionVoucherDeletedError)) throw error; }
       local=await loadCachedConsumptionVouchers(userId);
     } else {
-      const synced = await saveConsumptionVoucherUnlocked(userId, {
-        id:item.id, documentDate:item.documentDate, reference:item.reference, source:item.source,
-        sourceReference:item.sourceReference, notes:item.notes, lines:item.lines,
-      });
+      const synced = await replayOrdinaryDocument('consumption_vouchers', voucherColumns, userId, authorization, item, voucherToRemote, voucherFromRemote);
+      if (synced !== item) await replaceCache(voucherKey(userId), synced);
       local=local.map(entry=>entry.id===synced.id?synced:entry);
     }
   }
-  const authorization=await voucherAuthorization(userId);
-  if(!authorization)return visible();
   const {data,error}=await supabase.from('consumption_vouchers')
-    .select('id,document_date,reference,source,source_reference,notes,lines,total_cost,created_at,updated_at')
+    .select(voucherColumns)
     .eq('user_id',userId).order('document_date',{ascending:false}).order('updated_at',{ascending:false}).limit(100)
     .setHeader('Authorization',authorization);
   if(error)return visible();
-  const remote=(data as RemoteVoucher[]).map(voucherFromRemote);
-  const pending=local.filter(item=>item.syncState==='pending'&&!item.deletedAt);
-  // Keep production creation/deletion receipts even outside the latest-100 list.
-  const receipts=local.filter(item=>item.createOnly && item.syncState!=='pending' && !remote.some(row=>row.id===item.id));
-  const merged=[...pending,...remote.filter(item=>!pending.some(entry=>entry.id===item.id)).map(item=>({...item,createOnly:local.some(entry=>entry.id===item.id&&entry.createOnly)||undefined})),...receipts];
+  if (!Array.isArray(data)) return visible();
+  const merged = await reconcileHistory('consumption_vouchers', voucherColumns, userId, authorization, local, data as RemoteVoucher[], voucherFromRemote);
   await AsyncStorage.setItem(voucherKey(userId),JSON.stringify(merged));
   return merged.filter(item=>!item.deletedAt);
 }
 
 async function syncBulkBatchesUnlocked(userId: string): Promise<BulkBatch[]> {
   let local = await loadCachedBulkBatches(userId);
-  if (!canUseCloud(userId) || !supabase) return local;
-  for (const item of local.filter((entry) => entry.syncState === 'pending')) {
-    const synced = await saveBulkBatchUnlocked(userId, {
-      id: item.id,
-      recipeId: item.recipeId,
-      batchDate: item.batchDate,
-      title: item.title,
-      source: item.source,
-      sourceReference: item.sourceReference,
-      lines: item.lines,
-      finalWeightGrams: item.finalWeightGrams,
-      portions: item.portions,
-      salePriceGross: item.salePriceGross,
-      vatPercent: item.vatPercent,
-      notes: item.notes,
-    });
+  const visible = () => local.filter(item => !item.deletedAt);
+  if (!canUseCloud(userId) || !supabase) return visible();
+  const authorization = await voucherAuthorization(userId);
+  if (!authorization) return visible();
+  for (const item of local.filter((entry) => entry.syncState === 'pending' && !entry.deletedAt)) {
+    const synced = await replayOrdinaryDocument('bulk_batches', batchColumns, userId, authorization, item, batchToRemote, batchFromRemote);
+    if (synced !== item) await replaceCache(batchKey(userId), synced);
     local = local.map((entry) => entry.id === synced.id ? synced : entry);
   }
   const { data, error } = await supabase
     .from('bulk_batches')
-    .select('id,recipe_id,batch_date,title,source,source_reference,lines,final_weight_grams,portions,sale_price_gross,vat_percent,total_cost,portion_cost,cost_per_kg,food_cost_percent,notes,created_at,updated_at')
+    .select(batchColumns)
     .eq('user_id', userId)
     .order('batch_date', { ascending: false })
     .order('updated_at', { ascending: false })
-    .limit(100);
-  if (error) return local;
-  const remote = (data as RemoteBatch[]).map(batchFromRemote);
-  const pending = local.filter((item) => item.syncState === 'pending');
-  const merged = [...pending, ...remote.filter((item) => !pending.some((entry) => entry.id === item.id))];
+    .limit(100).setHeader('Authorization', authorization);
+  if (error || !Array.isArray(data)) return visible();
+  const merged = await reconcileHistory('bulk_batches', batchColumns, userId, authorization, local, data as RemoteBatch[], batchFromRemote);
   await AsyncStorage.setItem(batchKey(userId), JSON.stringify(merged));
-  return merged;
+  return merged.filter(item => !item.deletedAt);
 }
 
 export const saveConsumptionVoucher = (userId: string, draft: ConsumptionVoucherDraft) =>

@@ -25,6 +25,8 @@ export async function scanConsumptionDocument(imageUri: string): Promise<ParsedC
   });
   if (error) throw await scanFunctionError(error);
   const rows = normalizeScannedConsumptionRows(result);
-  if (!rows.length) throw new Error('scan_empty');
+  if (!rows.some((row) => row.name.trim() && row.quantity !== null && row.quantity > 0)) {
+    throw new Error('scan_empty');
+  }
   return rows;
 }

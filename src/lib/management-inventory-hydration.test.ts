@@ -34,7 +34,7 @@ let serverWriteTime: string | undefined;
 
 const fixtureFetch: typeof fetch = async (input, init) => {
   const url = new URL(String(input));
-  expect(url.pathname).toBe('/rest/v1/inventory_counts');
+  expect(url.pathname).toBe(init?.method === 'POST' ? '/rest/v1/inventory_counts' : '/rest/v1/management_physical_inventory');
   if (init?.method === 'POST') {
     if (rejectWrites) return Response.json({ code: '23514' }, { status: 400 });
     const row = JSON.parse(String(init.body)) as Count;

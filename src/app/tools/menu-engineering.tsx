@@ -7,7 +7,7 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 
@@ -21,7 +21,7 @@ import { usePreferences } from '@/contexts/preferences-context';
 import { useSubscription } from '@/contexts/subscription-context';
 import { useWorkspace } from '@/contexts/workspace-context';
 import { buildMenuEngineering, type MenuClass } from '@/lib/operations';
-import { currentSalesPeriod, loadSales, saveSales } from '@/lib/operations-storage';
+import { currentSalesPeriod, loadPendingSales, loadSales, saveSales } from '@/lib/operations-storage';
 import { matchSalesRows, parseSalesFile, type SalesImportPreview } from '@/lib/sales-import';
 import { readDocumentBytes, readDocumentText } from '@/lib/document-bytes';
 import { buildMenuActions } from '@/lib/menu-actions';
@@ -37,7 +37,7 @@ const CLASS_COLORS: Record<MenuClass, string> = {
 export default function MenuEngineeringScreen() {
   const auth = useAuth();
   const router = useRouter();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { format } = usePreferences();
   const { recipes } = useWorkspace();
   const { isViewer } = useSubscription();
@@ -49,15 +49,39 @@ export default function MenuEngineeringScreen() {
   const [search, setSearch] = useState('');
   const [shown, setShown] = useState(6);
   const [salesReady, setSalesReady] = useState(false);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [feedback, setFeedback] = useState<Record<string, 'invalid' | 'saving' | 'failed' | 'pending' | 'conflict'>>({});
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [reload, setReload] = useState(0);
   const periodStart = currentSalesPeriod();
+  const scope = `${userId}:${periodStart}`;
+  const currentScope = useRef(scope);
+  useLayoutEffect(() => { currentScope.current = scope; return () => { currentScope.current = ''; }; }, [scope]);
+  const revisions = useRef<Record<string, number>>({});
+  const copy = locale === 'ro' ? {
+    invalid: 'Introdu o cantitate validă, zero sau pozitivă. Poți folosi virgula zecimală.',
+    saving: 'Se salvează…', failed: 'Salvarea nu a fost confirmată. Reîncearcă pentru a păstra această valoare.',
+    pending: 'Valoarea este păstrată pe acest dispozitiv. Sincronizarea trebuie reîncercată.',
+    conflict: 'Vânzările s-au schimbat pe alt dispozitiv. Verifică valoarea și reîncearcă salvarea pentru a confirma modificarea ta.',
+    loadFailed: 'Vânzările nu au putut fi deschise. Reîncearcă înainte de a modifica valorile.',
+  } : {
+    invalid: 'Enter a valid quantity of zero or more. Decimal commas are accepted.',
+    saving: 'Saving…', failed: 'Saving was not confirmed. Retry to keep this value.',
+    pending: 'This value is kept on this device. Synchronization needs to be retried.',
+    conflict: 'Sales changed on another device. Review the value and retry saving to confirm your edit.',
+    loadFailed: 'Sales could not be opened. Retry before editing values.',
+  };
 
   useEffect(() => {
     let cancelled = false;
     setSalesReady(false);
-    void loadSales(userId, periodStart).then((value) => { if (!cancelled) setSales(value); })
-      .catch(() => undefined).finally(() => { if (!cancelled) setSalesReady(true); });
+    setLoadFailed(false); setSales({}); setDrafts({}); setFeedback({}); setPreview(null); setImportName(null); setBusy(false); revisions.current = {};
+    void loadSales(userId, periodStart).then(async (value) => {
+      const pending = await loadPendingSales(userId, periodStart);
+      if (!cancelled) { setSales(value); setFeedback(pending); setSalesReady(true); }
+    }).catch(() => { if (!cancelled) setLoadFailed(true); });
     return () => { cancelled = true; };
-  }, [periodStart, userId]);
+  }, [periodStart, userId, reload]);
 
   const sellable = recipes.filter((recipe) => !recipe.isSubRecipe);
   const analysis = useMemo(() => buildMenuEngineering(sellable, sales), [sales, sellable]);
@@ -66,14 +90,22 @@ export default function MenuEngineeringScreen() {
   const filtered = sellable.filter((recipe) => normalizeText(recipe.title).includes(normalizeText(search)));
 
   const update = (recipeId: string, raw: string) => {
-    if (!salesReady || isViewer) return;
-    const parsed = Number(raw.replace(',', '.').replace(/[^0-9.]/g, ''));
-    const next = {
-      ...sales,
-      [recipeId]: Number.isFinite(parsed) ? Math.max(0, parsed) : 0,
-    };
-    setSales(next);
-    void saveSales(userId, next, periodStart).catch(() => undefined);
+    if (!salesReady || isViewer || busy) return;
+    setDrafts(previous => ({ ...previous, [recipeId]: raw }));
+    const revision = (revisions.current[recipeId] ?? 0) + 1;
+    revisions.current[recipeId] = revision;
+    const parsed = /^(?:\d+(?:[.,]\d*)?|[.,]\d+)$/.test(raw.trim()) ? Number(raw.trim().replace(',', '.')) : NaN;
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      setFeedback(previous => ({ ...previous, [recipeId]: 'invalid' })); return;
+    }
+    setFeedback(previous => ({ ...previous, [recipeId]: 'saving' }));
+    void saveSales(userId, { [recipeId]: parsed }, periodStart).then(() => {
+      if (currentScope.current !== scope || revisions.current[recipeId] !== revision) return;
+      setSales(previous => ({ ...previous, [recipeId]: parsed }));
+      setFeedback(previous => { const next = { ...previous }; delete next[recipeId]; return next; });
+    }).catch(() => {
+      if (currentScope.current === scope && revisions.current[recipeId] === revision) setFeedback(previous => ({ ...previous, [recipeId]: 'failed' }));
+    });
   };
 
   const pickSalesFile = async () => {
@@ -96,29 +128,33 @@ export default function MenuEngineeringScreen() {
         asset.name.toLowerCase().endsWith('.csv') ? await readDocumentText(asset.uri)
           : await readDocumentBytes(asset.uri, 10_000_000, 'DOCUMENT_TOO_LARGE'),
       );
+      if (currentScope.current !== scope) return;
       setPreview(matchSalesRows(parsed, sellable));
       setImportName(asset.name);
     } catch {
-      Alert.alert(t('menu.importFailedTitle'), t('menu.importFailedBody'));
+      if (currentScope.current === scope) Alert.alert(t('menu.importFailedTitle'), t('menu.importFailedBody'));
     } finally {
-      setBusy(false);
+      if (currentScope.current === scope) setBusy(false);
     }
   };
 
   const confirmImport = async () => {
     if (!preview?.matches.length || isViewer || busy) return;
-    const next = { ...sales };
+    const next: Record<string, number> = {};
     preview.matches.forEach((match) => { next[match.recipe.id] = match.row.sold; });
     setBusy(true);
     try {
       await saveSales(userId, next, periodStart, 'file_import', importName);
-      setSales(next);
+      if (currentScope.current !== scope) return;
+      setSales(previous => ({ ...previous, ...next }));
+      setDrafts(previous => { const value = { ...previous }; Object.keys(next).forEach(id => { delete value[id]; }); return value; });
+      setFeedback(previous => { const value = { ...previous }; Object.keys(next).forEach(id => { delete value[id]; }); return value; });
       setPreview(null);
       Alert.alert(t('menu.importDoneTitle'), t('menu.importDoneBody', { count: preview.matches.length }));
     } catch {
-      Alert.alert(t('menu.importFailedTitle'), t('menu.importFailedBody'));
+      if (currentScope.current === scope) Alert.alert(t('menu.importFailedTitle'), copy.failed);
     } finally {
-      setBusy(false);
+      if (currentScope.current === scope) setBusy(false);
     }
   };
 
@@ -128,6 +164,7 @@ export default function MenuEngineeringScreen() {
       <Card tone="soft">
         <Body>{t('menu.instructions')}</Body>
         <Text style={styles.period}>{t('menu.period', { value: periodStart.slice(0, 7) })}</Text>
+        {loadFailed && <><Body>{copy.loadFailed}</Body><AppButton label={t('common.retry')} variant="secondary" onPress={() => setReload(value => value + 1)} /></>}
         {!isViewer && (
           <AppButton
             label={t('menu.importSales')}
@@ -186,10 +223,15 @@ export default function MenuEngineeringScreen() {
               style={styles.salesField}
               label={t('menu.sold')}
               keyboardType="number-pad"
-              value={sales[recipe.id] !== undefined ? String(sales[recipe.id]) : ''}
-              editable={!isViewer && salesReady}
+              value={drafts[recipe.id] ?? (sales[recipe.id] !== undefined ? String(sales[recipe.id]) : '')}
+              hint={feedback[recipe.id] ? copy[feedback[recipe.id]] : undefined}
+              editable={!isViewer && salesReady && !busy}
               onChangeText={(value) => update(recipe.id, value)}
             />
+            {!isViewer && ['failed', 'pending', 'conflict'].includes(feedback[recipe.id] ?? '') && <AppButton
+              label={t('common.retry')} variant="ghost" disabled={busy || !salesReady}
+              onPress={() => update(recipe.id, drafts[recipe.id] ?? String(sales[recipe.id] ?? ''))}
+            />}
           </View>
         ))}
         {filtered.length > shown && <AppButton label={t('menu.showMore')} variant="ghost" onPress={() => setShown((value) => value + 6)} />}

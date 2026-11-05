@@ -21,7 +21,7 @@ vi.mock('@/components/tool-header', () => ({ ToolHeader: 'ToolHeader' }));
 vi.mock('@/components/ui', () => Object.fromEntries(['AppButton','Body','Card','Field','ListSkeleton','Screen','SectionHeader','StatusPill'].map(name => [name, name])));
 
 import HrScreen from '@/app/tools/hr';
-import { saveHrEmployee } from '@/lib/hr-repository';
+import { saveHrEmployee, saveHrShift } from '@/lib/hr-repository';
 
 let tree: ReactTestRenderer | undefined;
 const find = (type: string) => tree!.root.findAll(node => node.type === type);
@@ -33,13 +33,14 @@ beforeEach(() => {
   fixture.locale = 'en'; fixture.mode = 'schedule';
   vi.mocked(saveHrEmployee).mockClear();
   vi.mocked(saveHrEmployee).mockImplementation(async (_userId, input) => ({ ...input, id: 'saved', createdAt: '', updatedAt: '' }));
+  vi.mocked(saveHrShift).mockClear();
   const stamp = new Date().toISOString();
   fixture.data = {
     employees: [{ id: 'person', name: 'Ștefan', role: '', locationId: null, locationName: '', grossSalary: 1250.5, netSalary: 850.25, active: true, createdAt: stamp, updatedAt: stamp }],
     shifts: [{ id: 'shift', employeeId: 'person', workDate: `${localIsoDate().slice(0, 7)}-01`, plannedStart: '08:00', plannedEnd: '16:30', actualStart: '08:00', actualEnd: '16:30', status: 'present', notes: '', updatedAt: stamp }],
   };
 });
-afterEach(async () => { await act(async () => tree?.unmount()); tree = undefined; vi.unstubAllGlobals(); });
+afterEach(async () => { await act(async () => tree?.unmount()); tree = undefined; vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('HR screen locale formatting', () => {
   it.each([['en', '8.5', 'hours', 'MO'], ['ro', '8,5', 'ore', 'LU']])('uses %s decimals consistently in calendar and totals', async (locale, value, hours, weekday) => {
@@ -66,6 +67,72 @@ describe('HR screen locale formatting', () => {
   });
 });
 
+
+describe('HR timesheet month navigation', () => {
+  it.each([
+    ['2028-01-31', 'Next month', 29],
+    ['2028-03-31', 'Previous month', 29],
+    ['2027-03-31', 'Previous month', 28],
+  ])('starts a new February record after editing %s and choosing %s', async (originalDate, arrow, februaryDays) => {
+    vi.setSystemTime(new Date(`${originalDate}T12:00:00`));
+    fixture.data.shifts[0].workDate = originalDate;
+    fixture.data.shifts[0].notes = 'Previous month edit';
+    await render();
+    const press = async (label: string) => {
+      await act(async () => find('Pressable').find(node => node.props.accessibilityLabel === label)!.props.onPress());
+    };
+    await press('Day 31, Present');
+    const update = () => find('AppButton').find(node => node.props.label === 'Update day');
+    expect(update()).toBeDefined();
+    await press(arrow);
+    expect(find('Pressable').filter(node => /^Day \d+,/.test(node.props.accessibilityLabel ?? ''))).toHaveLength(februaryDays);
+
+    const save = find('AppButton').find(node => node.props.label === 'Save day to timesheet') ?? update();
+    await act(async () => save!.props.onPress());
+    expect(saveHrShift).toHaveBeenCalledWith('demo', expect.objectContaining({
+      id: undefined,
+      employeeId: 'person',
+      workDate: `${originalDate.slice(0, 4)}-02-01`,
+      plannedStart: '08:00',
+      plannedEnd: '16:00',
+      actualStart: '',
+      actualEnd: '',
+      status: 'scheduled',
+      notes: '',
+    }));
+  });
+
+  it('preserves the separate report month when the attendance month changes', async () => {
+    vi.setSystemTime(new Date('2028-01-31T12:00:00'));
+    await render();
+    const openTab = async (label: string) => {
+      await act(async () => find('Pressable').find(node => node.findAll(child => String(child.type) === 'Text' && child.children.join('') === label).length)!.props.onPress());
+    };
+    const reportMonth = () => find('Field').find(node => node.props.label === 'Month (YYYY-MM)')!;
+    await openTab('Reports');
+    await act(async () => reportMonth().props.onChangeText('2027-11'));
+    await openTab('Timesheets');
+    expect(find('DateInput')[0].props.value).toBe('2028-01-31');
+    await act(async () => find('Pressable').find(node => node.props.accessibilityLabel === 'Next month')!.props.onPress());
+    await openTab('Reports');
+    expect(reportMonth().props.value).toBe('2027-11');
+  });
+
+  it('opens the saved entry when the first day of the destination month is occupied', async () => {
+    vi.setSystemTime(new Date('2028-01-31T12:00:00'));
+    fixture.data.shifts.push({ ...fixture.data.shifts[0], id: 'february-shift', workDate: '2028-02-01', notes: 'Existing February record' });
+    await render();
+    await act(async () => find('Pressable').find(node => node.props.accessibilityLabel === 'Next month')!.props.onPress());
+    expect(find('DateInput')[0].props.value).toBe('2028-02-01');
+    const update = find('AppButton').find(node => node.props.label === 'Update day')!;
+    await act(async () => update.props.onPress());
+    expect(saveHrShift).toHaveBeenCalledWith('demo', expect.objectContaining({
+      id: 'february-shift',
+      workDate: '2028-02-01',
+      notes: 'Existing February record',
+    }));
+  });
+});
 
 describe('HR report month input', () => {
   it.each(['', '2026-99', '2026-00', '2026-2', 'abcd', '0000-01'])('retains invalid month %s while blocking misleading reports and exports', async (period) => {

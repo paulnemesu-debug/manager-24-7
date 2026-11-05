@@ -15,6 +15,11 @@ on:
         type: boolean
         required: false
         default: false
+      offline_upgrade:
+        description: Verify cached data through offline cold starts and upgrades, then check the final version online
+        type: boolean
+        required: false
+        default: false
       apk70_sha256:
         description: Optional verified SHA-256 of the finished staging APK 70
         type: string
@@ -36,6 +41,7 @@ jobs:
       ANDROID_SERIAL: emulator-5554
       QA_DIAGNOSTICS_ONLY: ${{ inputs.diagnostics_only }}
       QA_ARTIFACT_SET: ${{ inputs.artifact_set || 'arm64-original' }}
+      QA_OFFLINE_UPGRADE: ${{ inputs.offline_upgrade }}
       APK70_SHA256: ${{ inputs.apk70_sha256 }}
 
     steps:
@@ -85,6 +91,10 @@ jobs:
           fi
           if [[ "$QA_DIAGNOSTICS_ONLY" == true && -n "$APK70_SHA256" ]]; then
             echo 'APK 70 is only accepted in upgrade mode.' >&2
+            exit 1
+          fi
+          if [[ "$QA_DIAGNOSTICS_ONLY" == true && "$QA_OFFLINE_UPGRADE" == true ]]; then
+            echo 'Offline upgrades require the authenticated QA mode.' >&2
             exit 1
           fi
           mkdir -p "$QA_APK_DIR" "$QA_EVIDENCE"
@@ -168,6 +178,9 @@ jobs:
           elif [[ -z "$QA_STAGING_EMAIL" || ! "$QA_STAGING_OTP" =~ ^[0-9]{6,10}$ ]]; then
             echo 'A synthetic staging owner email and a fresh OTP are required.' >&2
             exit 1
+          fi
+          if [[ "$QA_OFFLINE_UPGRADE" == true ]]; then
+            mode+=(--offline-upgrade)
           fi
           emulator="$RUNNER_TEMP/android-qa-emulator/emulator/emulator"
           adb="$ANDROID_HOME/platform-tools/adb"

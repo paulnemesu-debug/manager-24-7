@@ -22,27 +22,43 @@ vi.mock('@react-native-async-storage/async-storage', () => ({ default: {
 
 function query(table: string) {
   let value: Record<string, unknown> | undefined;
+  let operation = 'read';
+  let single = false;
   const filters: [string, unknown][] = [];
+  const inclusionFilters: [string, readonly unknown[]][] = [];
   const builder = {
     select: () => builder,
     eq: (key: string, expected: unknown) => { filters.push([key, expected]); return builder; },
+    in: (key: string, values: readonly unknown[]) => { inclusionFilters.push([key, values]); return builder; },
+    setHeader: () => builder,
+    single: () => { single = true; return builder; },
     order: () => builder,
     limit: () => builder,
-    upsert: (input: Record<string, unknown>) => { value = input; return builder; },
-    then: (resolve: (result: { data: Record<string, unknown>[] | null; error: Error | null }) => unknown, reject?: (reason: unknown) => unknown) => Promise.resolve().then(() => {
+    upsert: (input: Record<string, unknown>) => { value = input; operation = 'upsert'; return builder; },
+    insert: (input: Record<string, unknown>) => { value = input; operation = 'insert'; return builder; },
+    update: (input: Record<string, unknown>) => { value = input; operation = 'update'; return builder; },
+    then: (resolve: (result: { data: Record<string, unknown>[] | Record<string, unknown> | null; error: Error | null }) => unknown, reject?: (reason: unknown) => unknown) => Promise.resolve().then(() => {
       if (state.throwTransport) throw new Error('Connection interrupted');
       if (!state.online || (value && state.blockedTables.has(table))) return { data: null, error: new Error('Offline') };
       if (value) {
+        const rows = state.rows[table] ?? [];
+        if (operation === 'insert' && rows.some(row => row.id === value!.id)) return { data: null, error: new Error('Duplicate ID') };
+        if (operation === 'update' && !rows.some(row => filters.every(([key, expected]) => row[key] === expected))) return { data: null, error: new Error('Revision conflict') };
         state.uploads.push({ table, value });
-        state.rows[table] = [value, ...(state.rows[table] ?? []).filter((row) => row.id !== value!.id)];
+        state.rows[table] = [{ ...value, updated_at: '2026-11-05T05:00:00.123456+00:00' }, ...(state.rows[table] ?? []).filter((row) => row.id !== value!.id)];
       }
-      return { data: (state.rows[table] ?? []).filter((row) => filters.every(([key, expected]) => row[key] === expected)), error: null };
+      const selected = (state.rows[table] ?? []).filter((row) => filters.every(([key, expected]) => row[key] === expected)
+        && inclusionFilters.every(([key, values]) => values.includes(row[key])));
+      return { data: single ? selected[0] ?? null : selected, error: null };
     }).then(resolve, reject),
   };
   return builder;
 }
 
-vi.mock('@/lib/supabase', () => ({ isDemoMode: false, isSupabaseConfigured: true, supabase: { from: (table: string) => query(table) } }));
+vi.mock('@/lib/supabase', () => ({ isDemoMode: false, isSupabaseConfigured: true, supabase: {
+  auth: { getSession: async () => ({ data: { session: { user: { id: 'waste-recovery' }, access_token: 'fixture-token' } }, error: null }) },
+  from: (table: string) => query(table),
+} }));
 
 import { loadWasteCompliance, saveRedistribution, saveWastePlan, saveWasteReceiver } from './waste-compliance-repository';
 
@@ -102,7 +118,7 @@ describe('waste compliance durable recovery', () => {
     expect((await saveRedistribution(userId, { ...transfer, quantity: 7 })).createdAt).toBe('2025-04-01T00:00:00.000Z');
   });
 
-  it('retries the same ID after a successful upload whose local acknowledgement could not be persisted', async () => {
+  it('acknowledges the same server payload without rewriting after local acknowledgement could not be persisted', async () => {
     await saveWasteReceiver(userId, receiver);
     state.online = true;
     state.rejectAcknowledgement = true;
@@ -112,7 +128,7 @@ describe('waste compliance durable recovery', () => {
     state.rejectAcknowledgement = false;
     expect((await loadWasteCompliance(userId)).receivers[0].syncState).toBe('synced');
     expect(state.rows.waste_receivers).toHaveLength(1);
-    expect(state.uploads.map((item) => item.value.id)).toEqual(['receiver', 'receiver']);
+    expect(state.uploads.map((item) => item.value.id)).toEqual(['receiver']);
   });
 
   it('keeps a durable pending save when the transport throws and replays it after recovery', async () => {

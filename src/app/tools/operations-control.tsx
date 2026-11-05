@@ -41,7 +41,12 @@ import type { InventoryFrequency, StockPolicy, SupplierOrder, WasteReason } from
 type ViewMode = 'orders' | 'waste' | 'inventory';
 type PolicyDraftRow = { id?: string; minimum: string; target: string; zone: string };
 const emptyData: OperationsControlData = { policies: [], orders: [], waste: [], schedules: [] };
-const numeric = (value: string) => Math.max(0, Number(value.replace(',', '.').replace(/[^0-9.]/g, '')) || 0);
+const numeric = (value: string) => {
+  const input = value.trim();
+  if (!input) return 0;
+  if (!/^(?:\d+(?:[.,]\d*)?|[.,]\d+)$/.test(input)) return NaN;
+  return Number(input.replace(',', '.'));
+};
 
 const WASTE_REASONS: { value: WasteReason; label: string }[] = [
   { value: 'expired', label: 'Expirat' },
@@ -84,6 +89,11 @@ export default function OperationsControlScreen() {
   const scheduleDirty = useRef(false);
 
   const actualLocationId = locationId === 'all' ? null : locationId;
+  const quantityError = locale === 'ro' ? 'Introdu o cantitate numerică pozitivă sau zero.' : 'Enter a nonnegative numeric quantity.';
+  const targetError = locale === 'ro' ? 'Ținta trebuie să fie cel puțin egală cu minimul.' : 'Target must be at least the minimum.';
+  const invalidNumber = (value: string) => !Number.isFinite(numeric(value));
+  const invalidPolicy = (row: PolicyDraftRow) => invalidNumber(row.minimum) || invalidNumber(row.target)
+    || (row.target.trim() !== '' && numeric(row.target) < numeric(row.minimum));
   const locationScope = JSON.stringify([userId, actualLocationId]);
   const counts = countDrafts[locationScope] ?? {};
   const stockDraft = stockDrafts[locationScope];
@@ -150,29 +160,39 @@ export default function OperationsControlScreen() {
 
   const normalizedPolicies = useMemo<StockPolicy[]>(() => catalog.flatMap((ingredient) => {
     const row = policies[ingredient.id];
-    if (!row || (!row.minimum.trim() && !row.target.trim() && !row.zone.trim())) return [];
+    if (!row || (!row.id && !row.minimum.trim() && !row.target.trim() && !row.zone.trim())) return [];
     const minimumQuantity = numeric(row.minimum);
+    const targetQuantity = row.target.trim() ? numeric(row.target) : minimumQuantity;
+    if (!Number.isFinite(minimumQuantity) || !Number.isFinite(targetQuantity) || targetQuantity < minimumQuantity) return [];
     return [{
       id: row.id ?? `draft:${ingredient.id}`,
       catalogId: ingredient.id,
       locationId: actualLocationId,
       minimumQuantity,
-      targetQuantity: Math.max(minimumQuantity, numeric(row.target)),
+      targetQuantity,
       storageZone: row.zone.trim(),
       updatedAt: '',
       syncState: 'local',
     }];
   }), [actualLocationId, catalog, policies]);
 
-  const suggestions = useMemo(() => buildRestockSuggestions(
+  const invalidPolicies = catalog.some(item => policies[item.id] && invalidPolicy(policies[item.id]));
+  const invalidStock = catalog.some(item => invalidNumber(onHand[item.id] ?? ''));
+  const invalidCounts = catalog.some(item => invalidNumber(counts[item.id] ?? ''));
+  const invalidOrders = invalidPolicies || invalidStock;
+  const suggestions = useMemo(() => invalidOrders ? [] : buildRestockSuggestions(
     catalog,
     normalizedPolicies,
     catalog.map((item) => ({ catalogId: item.id, onHand: numeric(onHand[item.id] ?? '') })),
     actualLocationId,
-  ), [actualLocationId, catalog, normalizedPolicies, onHand]);
+  ), [actualLocationId, catalog, invalidOrders, normalizedPolicies, onHand]);
   const orderGroups = useMemo(() => groupRestockBySupplier(suggestions), [suggestions]);
 
   const saveThresholds = async () => {
+    if (invalidOrders) {
+      Alert.alert(locale === 'ro' ? 'Verifică valorile' : 'Check quantities', invalidPolicies ? `${quantityError} ${targetError}` : quantityError);
+      return;
+    }
     setBusy(true);
     try {
       const saved = await Promise.all(normalizedPolicies.map((policy) => saveStockPolicy(userId, {
@@ -196,6 +216,10 @@ export default function OperationsControlScreen() {
   };
 
   const saveOrders = async () => {
+    if (invalidOrders) {
+      Alert.alert(locale === 'ro' ? 'Verifică valorile' : 'Check quantities', quantityError);
+      return;
+    }
     if (!orderGroups.length) return;
     setBusy(true);
     try {
@@ -217,6 +241,10 @@ export default function OperationsControlScreen() {
   };
 
   const shareOrders = async () => {
+    if (invalidOrders) {
+      Alert.alert(locale === 'ro' ? 'Verifică valorile' : 'Check quantities', quantityError);
+      return;
+    }
     if (!orderGroups.length) return;
     const message = [
       `${tr("Comandă furnizori ·")} ${localIsoDate()}`,
@@ -303,6 +331,10 @@ export default function OperationsControlScreen() {
   };
 
   const saveCount = async () => {
+    if (invalidCounts) {
+      Alert.alert(locale === 'ro' ? 'Cantitate invalidă' : 'Invalid quantity', quantityError);
+      return;
+    }
     const inventory: InventoryLine[] = catalog.flatMap((item) => {
       const raw = counts[item.id];
       if (!raw?.trim()) return [];
@@ -375,6 +407,9 @@ export default function OperationsControlScreen() {
             <Body light>{tr("La sau sub minim, aplicația propune cantitatea până la stocul țintă și grupează comanda pe furnizor.")}</Body>
           </Card>
           <Card>
+            <Body>{locale === 'ro'
+              ? 'Minimul necompletat înseamnă 0. Ținta necompletată folosește minimul. Golirea unui prag salvat îl resetează la 0.'
+              : 'An empty minimum means 0. An empty target uses the minimum. Clearing saved stock levels resets them to 0.'}</Body>
             {catalog.map((item) => {
               const row = policies[item.id] ?? { minimum: '', target: '', zone: '' };
               return (
@@ -387,16 +422,16 @@ export default function OperationsControlScreen() {
                     <StatusPill label={displayUnit(item.priceUnit, locale)} status="neutral" />
                   </View>
                   <View style={styles.fieldRow}>
-                    <Field style={styles.smallField} label={tr("În stoc")} keyboardType="decimal-pad" value={onHand[item.id] ?? ''} onChangeText={(value) => setStockDrafts((current) => ({ ...current, [locationScope]: { ...current[locationScope], [item.id]: value } }))} />
-                    <Field style={styles.smallField} label={tr("Minim")} keyboardType="decimal-pad" value={row.minimum} onChangeText={(value) => { formDirty.current = true; setPolicies((current) => ({ ...current, [item.id]: { ...row, minimum: value } })); }} />
-                    <Field style={styles.smallField} label={tr("Țintă")} keyboardType="decimal-pad" value={row.target} onChangeText={(value) => { formDirty.current = true; setPolicies((current) => ({ ...current, [item.id]: { ...row, target: value } })); }} />
+                    <Field style={styles.smallField} label={tr("În stoc")} keyboardType="decimal-pad" value={onHand[item.id] ?? ''} hint={invalidNumber(onHand[item.id] ?? '') ? quantityError : undefined} onChangeText={(value) => setStockDrafts((current) => ({ ...current, [locationScope]: { ...current[locationScope], [item.id]: value } }))} />
+                    <Field style={styles.smallField} label={tr("Minim")} keyboardType="decimal-pad" value={row.minimum} hint={invalidNumber(row.minimum) ? quantityError : undefined} onChangeText={(value) => { formDirty.current = true; setPolicies((current) => ({ ...current, [item.id]: { ...row, minimum: value } })); }} />
+                    <Field style={styles.smallField} label={tr("Țintă")} keyboardType="decimal-pad" value={row.target} hint={invalidNumber(row.target) ? quantityError : row.target.trim() && numeric(row.target) < numeric(row.minimum) ? targetError : undefined} onChangeText={(value) => { formDirty.current = true; setPolicies((current) => ({ ...current, [item.id]: { ...row, target: value } })); }} />
                   </View>
                   <Field label={tr("Zonă de depozitare")} placeholder={tr("Ex. Camera frigorifică")} value={row.zone} onChangeText={(value) => { formDirty.current = true; setPolicies((current) => ({ ...current, [item.id]: { ...row, zone: value } })); }} />
                 </View>
               );
             })}
             {!catalog.length && <Body>{tr("Adaugă ingredientele înainte de configurarea pragurilor.")}</Body>}
-            <AppButton label={tr("Salvează pragurile")} icon="save-outline" fullWidth loading={busy} onPress={() => void saveThresholds()} />
+            <AppButton label={tr("Salvează pragurile")} icon="save-outline" fullWidth loading={busy} disabled={invalidOrders} onPress={() => void saveThresholds()} />
           </Card>
 
           <Card tone={suggestions.length ? 'gold' : 'soft'}>
@@ -497,13 +532,13 @@ export default function OperationsControlScreen() {
               <SectionHeader eyebrow={tr("ZONĂ")} title={zone} />
               {ingredients.map((item) => (
                 <View key={item.id} style={styles.countRow}>
-                  <View style={styles.copy}><Text style={styles.name}>{item.name}</Text><Text style={styles.meta}>{tr("Ultimul:")} {onHand[item.id] ? format.number(numeric(onHand[item.id])) : '—'} {displayUnit(item.priceUnit, locale)}</Text></View>
-                  <Field style={styles.countField} label={`${tr("Real")} ${displayUnit(item.priceUnit, locale)}`} keyboardType="decimal-pad" value={counts[item.id] ?? ''} onChangeText={(value) => setCountDrafts((current) => ({ ...current, [locationScope]: { ...current[locationScope], [item.id]: value } }))} />
+                  <View style={styles.copy}><Text style={styles.name}>{item.name}</Text><Text style={styles.meta}>{tr("Ultimul:")} {onHand[item.id] && !invalidNumber(onHand[item.id]) ? format.number(numeric(onHand[item.id])) : '—'} {displayUnit(item.priceUnit, locale)}</Text></View>
+                  <Field style={styles.countField} label={`${tr("Real")} ${displayUnit(item.priceUnit, locale)}`} keyboardType="decimal-pad" value={counts[item.id] ?? ''} hint={invalidNumber(counts[item.id] ?? '') ? quantityError : undefined} onChangeText={(value) => setCountDrafts((current) => ({ ...current, [locationScope]: { ...current[locationScope], [item.id]: value } }))} />
                 </View>
               ))}
             </Card>
           ))}
-          <AppButton label={tr("Salvează numărătoarea")} icon="checkmark-circle-outline" fullWidth loading={busy} disabled={!Object.values(counts).some((value) => value.trim())} onPress={() => void saveCount()} />
+          <AppButton label={tr("Salvează numărătoarea")} icon="checkmark-circle-outline" fullWidth loading={busy} disabled={invalidCounts || !Object.values(counts).some((value) => value.trim())} onPress={() => void saveCount()} />
           <AppButton label={tr("Deschide raportul de varianță")} icon="analytics-outline" variant="secondary" fullWidth onPress={() => router.push('/tools/management-control')} />
         </>
       )}

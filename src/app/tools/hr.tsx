@@ -224,12 +224,16 @@ export default function HrScreen() {
     clearShiftFields(id, date);
   };
 
-  const openDay = (day: number) => {
-    if (!employeeId) return;
-    const date = hrDateForDay(sheetMonth, day);
+  const openShiftDate = (date: string) => {
     const existing = data.shifts.find((item) => item.employeeId === employeeId && item.workDate === date);
     if (existing) editShift(existing);
     else clearShiftFields(employeeId, date);
+  };
+
+  const navigateSheetMonth = (delta: number) => {
+    const nextMonth = changeHrPeriod(sheetMonth, delta);
+    setSheetMonth(nextMonth);
+    openShiftDate(hrDateForDay(nextMonth, 1));
   };
 
   const saveShift = async () => {
@@ -371,9 +375,9 @@ export default function HrScreen() {
       <Card tone="navy">
         <SectionHeader eyebrow={tr("LUNA FIȘELOR")} title={hrPeriodLabel(sheetMonth, locale)} light />
         <View style={styles.monthNav}>
-          <Pressable accessibilityLabel={tr("Luna anterioară")} onPress={() => setSheetMonth(changeHrPeriod(sheetMonth, -1))} style={styles.monthNavButton}><Ionicons name="chevron-back" size={22} color={Brand.white} /></Pressable>
+          <Pressable accessibilityLabel={tr("Luna anterioară")} onPress={() => navigateSheetMonth(-1)} style={styles.monthNavButton}><Ionicons name="chevron-back" size={22} color={Brand.white} /></Pressable>
           <Text style={styles.monthCode}>{sheetMonth}</Text>
-          <Pressable accessibilityLabel={tr("Luna următoare")} onPress={() => setSheetMonth(changeHrPeriod(sheetMonth, 1))} style={styles.monthNavButton}><Ionicons name="chevron-forward" size={22} color={Brand.white} /></Pressable>
+          <Pressable accessibilityLabel={tr("Luna următoare")} onPress={() => navigateSheetMonth(1)} style={styles.monthNavButton}><Ionicons name="chevron-forward" size={22} color={Brand.white} /></Pressable>
         </View>
       </Card>
 
@@ -416,7 +420,7 @@ export default function HrScreen() {
                 <Pressable
                   key={day}
                   accessibilityLabel={`${tr("Ziua")} ${day}, ${shift ? statusLabels[shift.status] : tr("necompletată")}`}
-                  onPress={() => openDay(day)}
+                  onPress={() => openShiftDate(hrDateForDay(sheetMonth, day))}
                   style={({ pressed }) => [
                     styles.dayCell,
                     hrDayIsWeekend(sheetMonth, day) && styles.dayWeekend,
@@ -439,12 +443,7 @@ export default function HrScreen() {
 
         <Card>
           <SectionHeader eyebrow={editingShiftId ? tr("ACTUALIZARE ZI") : tr("ZI NOUĂ")} title={`${selectedMonthRow.employee.name} · ${workDate}`} />
-          <HaccpDateInput label={tr("Data")} locale={locale} value={workDate} onChange={(next) => {
-            setWorkDate(next);
-            const existing = data.shifts.find((item) => item.employeeId === employeeId && item.workDate === next);
-            if (existing) editShift(existing);
-            else clearShiftFields(employeeId, next);
-          }} />
+          <HaccpDateInput label={tr("Data")} locale={locale} value={workDate} onChange={openShiftDate} />
           <View style={styles.row}>
             <View style={styles.flex}><HaccpTimeInput label={tr("Program început")} locale={locale} value={plannedStart} onChange={setPlannedStart} /></View>
             <View style={styles.flex}><HaccpTimeInput label={tr("Program sfârșit")} locale={locale} value={plannedEnd} onChange={setPlannedEnd} /></View>

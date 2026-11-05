@@ -18,6 +18,9 @@ ACTIVITY = f"{PACKAGE}/.MainActivity"
 HOME = ("Acasă", "Home")
 RECIPES = ("Rețete", "Recipes")
 PRODUCTION = ("Producție", "Production")
+ACCOUNT = ("Cont", "Account")
+MY_ACCOUNT = ("Contul meu", "My account")
+EDIT_LOCATION = ("Editează", "Edit")
 EMAIL = ("Adresa de email", "Email address")
 EMAIL_HINT = ("nume@restaurant.ro", "name@restaurant.com")
 HAVE_CODE = ("Am deja un cod", "I already have a code")
@@ -49,7 +52,8 @@ SAVE_EQUIPMENT = ("Salvează utilaj", "Save equipment")
 INITIAL_LABELS = EMAIL + HAVE_CODE + SEND_CODE + ONBOARDING + HOME + (
     "Manager 24/7", "Manager 24/7 by PARADIM", "Loading", "Se încarcă", "Close app",
 )
-FAILURE_LABELS = (HOME + RECIPES + PRODUCTION + ONBOARDING + LOCATION_SETUP + CREATE_LOCATION
+FAILURE_LABELS = (HOME + RECIPES + PRODUCTION + ACCOUNT + MY_ACCOUNT + EDIT_LOCATION
+                  + ONBOARDING + LOCATION_SETUP + CREATE_LOCATION
                   + HAVE_CODE + SEND_CODE + VERIFY + (
                       "Nu am putut verifica locația", "Could not verify your location",
                       "Costuri clare. Profit controlat.", "Clear costs. Controlled profit.",
@@ -328,6 +332,52 @@ class Device:
 
     def stop(self):
         self.adb("force stop Manager 24/7", "shell", "am", "force-stop", PACKAGE)
+
+    def connectivity_state(self):
+        wifi = self.adb("read Wi-Fi state", "shell", "settings", "get", "global", "wifi_on").strip()
+        data = self.adb("read mobile data state", "shell", "settings", "get", "global", "mobile_data").strip()
+        require(wifi in (b"0", b"1") and data in (b"0", b"1"),
+                "Android did not provide recognizable Wi-Fi and mobile data settings")
+        connectivity = self.adb("read connectivity state", "shell", "dumpsys", "connectivity").decode()
+        default = re.search(r"^\s*Active default network:\s*(none|\d+)\s*$", connectivity, re.M)
+        networks = re.search(r"Current Networks:\s*\n(.*?)\n\s*Network Requests:", connectivity, re.S)
+        require(default and networks, "Android connectivity state could not be verified")
+        network_lines = [line for line in networks[1].splitlines() if "NetworkAgentInfo" in line]
+        network_id = None if default[1] == "none" else int(default[1])
+        validated = network_id is not None and any(
+            f"network{{{network_id}}}" in line and re.search(r"\bVALIDATED\b", line)
+            for line in network_lines
+        )
+        # Persist only booleans/counts/IDs, never the raw dump with addresses and SSIDs.
+        return {"wifiEnabled": wifi == b"1", "mobileDataEnabled": data == b"1",
+                "activeDefaultNetwork": network_id, "currentNetworkCount": len(network_lines),
+                "defaultNetworkValidated": bool(validated)}
+
+    def wait_connectivity(self, online, seconds=30):
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            state = self.connectivity_state()
+            if online and state["activeDefaultNetwork"] is not None and state["defaultNetworkValidated"]:
+                return state
+            if (not online and not state["wifiEnabled"] and not state["mobileDataEnabled"]
+                    and state["activeDefaultNetwork"] is None and state["currentNetworkCount"] == 0):
+                return state
+            time.sleep(0.5)
+        raise QAError(f"Android did not confirm {'online' if online else 'offline'} connectivity")
+
+    def restore_connectivity(self, original):
+        failures = []
+        for service, key in (("wifi", "wifiEnabled"), ("data", "mobileDataEnabled")):
+            try:
+                self.adb("restore emulator connectivity", "shell", "svc", service,
+                         "enable" if original[key] else "disable")
+            except QAError:
+                failures.append(service)
+        require(not failures, "Android failed to restore the original connectivity settings")
+        restored = self.wait_connectivity(True, seconds=45)
+        require(all(restored[key] == original[key] for key in ("wifiEnabled", "mobileDataEnabled")),
+                "Android did not restore the original connectivity settings")
+        return restored
 
     def require_fixture_screen(self, expected):
         require(self.labels(self.hierarchy(), expected), "Fixture screen changed before the evidence capture")
@@ -662,7 +712,7 @@ def relaunch(device):
     device.find(HOME, seconds=75)
 
 
-def run(device, apk_dir, verified, result):
+def run(device, apk_dir, verified, result, offline_upgrade=False):
     email = os.environ.get("QA_STAGING_EMAIL", "")
     code = os.environ.get("QA_STAGING_OTP", "")
     require(re.fullmatch(r"[A-Za-z0-9._+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", email)
@@ -697,20 +747,17 @@ def run(device, apk_dir, verified, result):
     create_equipment(device, equipment, brand)
 
     versions = [entry["versionCode"] for entry in verified]
-    for version in versions:
-        phase = f"apk{version}"
+    def checkpoint(version, phase, network_mode=None, record=False):
         device.phase = f"verify-{phase}"
-        if version != 68:
-            device.stop()
-            device.install(apk_dir / f"{phase}.apk", upgrade=True)
+        before = device.wait_connectivity(network_mode == "online") if network_mode else None
         observed = device.package_info(version)
         require(all(observed[key] == original[key] for key in ("uid", "firstInstallTime")),
                 "Android package UID or first installation time changed across the update")
         relaunch(device)
-        recording = assert_recipe(device, title, ingredients, phase, record=version == versions[-1])
+        recording = assert_recipe(device, title, ingredients, phase, record=record)
         relaunch(device)
         assert_equipment(device, equipment, brand, phase)
-        checkpoint = {
+        verified_checkpoint = {
             **observed,
             "signedInAfterRelaunch": True,
             "recipe": title,
@@ -719,9 +766,57 @@ def run(device, apk_dir, verified, result):
             "equipmentBrand": brand,
         }
         if recording:
-            checkpoint["screenRecording"] = recording
-        result["checkpoints"].append(checkpoint)
+            verified_checkpoint["screenRecording"] = recording
+        if network_mode:
+            verified_checkpoint.update(networkMode=network_mode, connectivityBefore=before,
+                                       connectivityAfter=device.wait_connectivity(network_mode == "online"))
+        result["checkpoints"].append(verified_checkpoint)
         print(f"APK {version}: retained signed-in access, recipe and equipment fields verified.", flush=True)
+
+    original_network = None
+    try:
+        if offline_upgrade:
+            # Reading the existing location through its normal UI warms its persisted cache.
+            device.phase = "warm-location-cache"
+            relaunch(device)
+            device.tab(ACCOUNT)
+            device.folder(MY_ACCOUNT)
+            device.find(EDIT_LOCATION, scroll="both", seconds=60)
+            device.phase = "disconnect-network"
+            original_network = device.wait_connectivity(True)
+            result["connectivityTransitions"] = [{"stage": "before-offline", **original_network}]
+            device.adb("disable emulator Wi-Fi", "shell", "svc", "wifi", "disable")
+            device.adb("disable emulator mobile data", "shell", "svc", "data", "disable")
+            disconnected = device.wait_connectivity(False)
+            result["connectivityTransitions"].append({"stage": "offline-confirmed", **disconnected})
+        for version in versions:
+            if version != 68:
+                device.phase = f"install-apk{version}"
+                if offline_upgrade:
+                    state = device.wait_connectivity(False)
+                    result["connectivityTransitions"].append({"stage": f"before-install-{version}", **state})
+                device.stop()
+                device.install(apk_dir / f"apk{version}.apk", upgrade=True)
+            phase = f"apk{version}-offline" if offline_upgrade else f"apk{version}"
+            checkpoint(version, phase, "offline" if offline_upgrade else None,
+                       record=version == versions[-1])
+    finally:
+        if original_network is not None:
+            active_failure = sys.exc_info()[0] is not None
+            failed_phase = device.phase
+            try:
+                device.phase = "restore-network"
+                restored = device.restore_connectivity(original_network)
+                result["connectivityTransitions"].append({"stage": "online-restored", **restored})
+            except QAError as error:
+                result["connectivityRestoreFailure"] = str(error)
+                if not active_failure:
+                    raise
+            finally:
+                if active_failure:
+                    device.phase = failed_phase
+    if offline_upgrade:
+        checkpoint(versions[-1], f"apk{versions[-1]}-online", "online")
 
 
 def main():
@@ -730,11 +825,14 @@ def main():
     parser.add_argument("--apk-dir", type=Path, required=True)
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--diagnostics-only", action="store_true")
+    parser.add_argument("--offline-upgrade", action="store_true")
     args = parser.parse_args()
     result = {"status": "failed", "checkpoints": []}
     device = None
     args.evidence.mkdir(parents=True, exist_ok=True)
     try:
+        require(not (args.offline_upgrade and args.diagnostics_only),
+                "Offline upgrades require the authenticated QA mode")
         verified = json.loads((args.evidence / "verified-apks.json").read_text(encoding="utf-8"))
         expected = ([68],) if args.diagnostics_only else ([68, 69], [68, 69, 70])
         require([item["versionCode"] for item in verified] in expected,
@@ -760,7 +858,9 @@ def main():
             result["status"] = "diagnostic"
             print("Initial Android diagnostics collected before credential input.")
         else:
-            run(device, args.apk_dir, verified, result)
+            if args.offline_upgrade:
+                result["offlineUpgrade"] = True
+            run(device, args.apk_dir, verified, result, offline_upgrade=args.offline_upgrade)
             result["status"] = "passed"
     except QAError as error:
         result["failure"] = str(error)

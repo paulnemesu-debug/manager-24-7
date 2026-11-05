@@ -79,6 +79,11 @@ export function accountLocalModule(key: string, userId: string): string | null {
     const period = key.slice(pendingSalesPrefix.length, -suffix.length);
     if (/^\d{4}-\d{2}-01$/.test(period)) return 'salesPending.' + period;
   }
+  const acknowledgedSalesPrefix = 'professional_foodcost.sales_acknowledged.';
+  if (key.startsWith(acknowledgedSalesPrefix) && key.endsWith(suffix)) {
+    const period = key.slice(acknowledgedSalesPrefix.length, -suffix.length);
+    if (/^\d{4}-\d{2}-01$/.test(period)) return 'salesAcknowledged.' + period;
+  }
   if (userId === 'demo' && key === 'professional_foodcost.demo_recipes.v2') return 'legacyDemoRecipes';
   if (userId === 'demo' && key === 'professional_foodcost.demo_catalog.v1') return 'legacyDemoCatalog';
   return null;

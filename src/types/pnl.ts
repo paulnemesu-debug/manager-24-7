@@ -34,9 +34,10 @@ export type PnlReport = PnlInputs & {
   createdAt: string;
   updatedAt: string;
   syncState: SyncState;
+  baseUpdatedAt?: string | null;
 };
 
-export type PnlReportDraft = Omit<PnlReport, 'createdAt' | 'updatedAt' | 'syncState'>;
+export type PnlReportDraft = Omit<PnlReport, 'createdAt' | 'updatedAt' | 'syncState' | 'baseUpdatedAt'>;
 
 export type PnlResult = {
   totalRevenue: number;

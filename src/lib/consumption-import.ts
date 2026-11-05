@@ -7,17 +7,23 @@
 
 import readXlsxFile from 'read-excel-file/universal';
 
-import { normalizeText, parsePrice, similarity } from '@/lib/price-import';
+import { normalizeText, similarity } from '@/lib/price-import';
+import { normalizeQuantity } from '@/lib/calculations';
 import { recalculateOperationalLine } from '@/lib/operations';
 import type { OperationalLine } from '@/types/operations';
 import type { CatalogIngredient, QuantityUnit } from '@/types/recipe';
 
+export type ConsumptionImportIssue = 'missing_name' | 'invalid_quantity' | 'invalid_unit' | 'invalid_price'
+  | 'missing_unit' | 'missing_price' | 'incompatible_unit';
+
 export type ParsedConsumptionRow = {
   name: string;
-  quantity: number;
+  quantity: number | null;
   unit: QuantityUnit | null;
   unitPrice: number | null;
   rowNumber: number;
+  raw: { name: string; quantity: string; unit: string; unitPrice: string };
+  issues: ConsumptionImportIssue[];
 };
 
 export type ConsumptionImportPreview = {
@@ -54,7 +60,7 @@ function parseDelimited(text: string): string[][] {
     } else if ((char === '\n' || char === '\r') && !quoted) {
       if (char === '\r' && text[index + 1] === '\n') index += 1;
       row.push(cell);
-      if (row.some((value) => value.trim())) rows.push(row);
+      rows.push(row);
       row = []; cell = '';
     } else cell += char;
   }
@@ -71,12 +77,12 @@ function headerIndex(headers: unknown[], candidates: string[]) {
   });
 }
 
-function positiveNumber(value: unknown): number | null {
-  if (typeof value === 'number') return Number.isFinite(value) && value > 0 ? value : null;
-  const normalized = String(value ?? '').trim().replace(/\s/g, '').replace(',', '.').replace(/[^0-9.-]/g, '');
-  if (!normalized) return null;
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+function nonnegativeNumber(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) && value >= 0 ? value : null;
+  const normalized = String(value ?? '').trim();
+  if (!/^\d+(?:[.,]\d+)?$/.test(normalized)) return null;
+  const parsed = Number(normalized.replace(',', '.'));
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function parseQuantityUnit(value: unknown): QuantityUnit | null {
@@ -89,6 +95,21 @@ function parseQuantityUnit(value: unknown): QuantityUnit | null {
   return null;
 }
 
+function parseRow(nameValue: unknown, quantityValue: unknown, unitValue: unknown, priceValue: unknown, rowNumber: number): ParsedConsumptionRow {
+  const raw = { name: String(nameValue ?? ''), quantity: String(quantityValue ?? ''), unit: String(unitValue ?? ''), unitPrice: String(priceValue ?? '') };
+  const name = raw.name.trim();
+  const parsedQuantity = nonnegativeNumber(quantityValue);
+  const quantity = parsedQuantity !== null && parsedQuantity > 0 ? parsedQuantity : null;
+  const unit = parseQuantityUnit(unitValue);
+  const unitPrice = nonnegativeNumber(priceValue);
+  const issues: ConsumptionImportIssue[] = [];
+  if (!name) issues.push('missing_name');
+  if (quantity === null) issues.push('invalid_quantity');
+  if (raw.unit.trim() && unit === null) issues.push('invalid_unit');
+  if (raw.unitPrice.trim() && unitPrice === null) issues.push('invalid_price');
+  return { name, quantity, unit, unitPrice, rowNumber, raw, issues };
+}
+
 export function normalizeScannedConsumptionRows(value: unknown): ParsedConsumptionRow[] {
   const rows = Array.isArray(value)
     ? value
@@ -98,16 +119,8 @@ export function normalizeScannedConsumptionRows(value: unknown): ParsedConsumpti
   return rows.slice(0, 200).flatMap((entry, index) => {
     if (!entry || typeof entry !== 'object') return [];
     const row = entry as Record<string, unknown>;
-    const name = String(row.name ?? row.ingredient ?? '').trim().slice(0, 180);
-    const quantity = positiveNumber(row.quantity ?? row.qty);
-    if (!name || quantity === null) return [];
-    return [{
-      name,
-      quantity,
-      unit: parseQuantityUnit(row.unit ?? row.uom),
-      unitPrice: positiveNumber(row.unitPrice ?? row.unit_price ?? row.price),
-      rowNumber: index + 1,
-    }];
+    return [parseRow(row.name ?? row.ingredient, row.quantity ?? row.qty, row.unit ?? row.uom,
+      row.unitPrice ?? row.unit_price ?? row.price, index + 1)];
   });
 }
 
@@ -120,16 +133,9 @@ function parseGrid(grid: unknown[][]): ParsedConsumptionRow[] {
     const unitIndex = headerIndex(header, UNIT_HEADERS);
     const priceIndex = headerIndex(header, PRICE_HEADERS);
     return grid.slice(rowIndex + 1).flatMap((row, offset) => {
-      const name = String(row[nameIndex] ?? '').trim();
-      const quantity = positiveNumber(row[quantityIndex]);
-      if (!name || quantity === null) return [];
-      return [{
-        name,
-        quantity,
-        unit: unitIndex >= 0 ? parseQuantityUnit(row[unitIndex]) : null,
-        unitPrice: priceIndex >= 0 ? parsePrice(row[priceIndex]) : null,
-        rowNumber: rowIndex + offset + 2,
-      }];
+      if (!row.some(value => String(value ?? '').trim())) return [];
+      return [parseRow(row[nameIndex], row[quantityIndex], unitIndex >= 0 ? row[unitIndex] : null,
+        priceIndex >= 0 ? row[priceIndex] : null, rowIndex + offset + 2)];
     });
   }
   return [];
@@ -162,11 +168,24 @@ export function buildConsumptionImportPreview(
   const lines: OperationalLine[] = [];
   const unresolved: ParsedConsumptionRow[] = [];
   for (const row of rows) {
+    if (row.issues.length || row.quantity === null) {
+      unresolved.push(row);
+      continue;
+    }
     const matched = matchCatalog(row.name, catalog);
     const unit = row.unit ?? matched?.priceUnit ?? null;
     const unitPrice = row.unitPrice ?? matched?.purchasePrice ?? null;
-    if (!unit || unitPrice === null) {
-      unresolved.push(row);
+    const issues: ConsumptionImportIssue[] = [];
+    if (!unit) issues.push('missing_unit');
+    if (unitPrice === null) issues.push('missing_price');
+    else if (!Number.isFinite(unitPrice) || unitPrice < 0) issues.push('invalid_price');
+    if (!unit || unitPrice === null || issues.length) {
+      unresolved.push({ ...row, issues });
+      continue;
+    }
+    const priceUnit = matched?.priceUnit ?? (unit === 'g' ? 'kg' : unit === 'ml' ? 'l' : unit);
+    if (normalizeQuantity(row.quantity, unit, priceUnit) === null) {
+      unresolved.push({ ...row, issues: ['incompatible_unit'] });
       continue;
     }
     lines.push(recalculateOperationalLine({
@@ -176,7 +195,7 @@ export function buildConsumptionImportPreview(
       quantity: row.quantity,
       unit,
       purchasePrice: unitPrice,
-      priceUnit: matched?.priceUnit ?? (unit === 'g' ? 'kg' : unit === 'ml' ? 'l' : unit),
+      priceUnit,
       cost: 0,
     }));
   }

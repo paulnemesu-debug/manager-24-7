@@ -38,12 +38,14 @@ export type ConsumptionVoucher = {
   createdAt: string;
   updatedAt: string;
   syncState: SyncState;
+  /** undefined denotes a legacy unknown base; null denotes a new unsent document. */
+  baseUpdatedAt?: string | null;
   deletedAt: string | null;
 };
 
 export type ConsumptionVoucherDraft = Omit<
   ConsumptionVoucher,
-  'createdAt' | 'updatedAt' | 'syncState' | 'deletedAt' | 'totalCost' | 'createOnly'
+  'createdAt' | 'updatedAt' | 'syncState' | 'deletedAt' | 'totalCost' | 'createOnly' | 'baseUpdatedAt'
 >;
 
 export type BulkBatchSource = 'manual' | 'file_import' | 'consumption_voucher';
@@ -68,6 +70,7 @@ export type BulkBatch = {
   createdAt: string;
   updatedAt: string;
   syncState: SyncState;
+  baseUpdatedAt?: string | null;
   deletedAt: string | null;
 };
 
@@ -81,6 +84,7 @@ export type BulkBatchDraft = Omit<
   | 'portionCost'
   | 'costPerKg'
   | 'foodCostPercent'
+  | 'baseUpdatedAt'
 >;
 
 export type BulkBatchTotals = Pick<

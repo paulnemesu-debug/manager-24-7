@@ -27,7 +27,7 @@ const mocks = {
     applyPriceUpdates: async rows => { writes.push(...rows); return 1; }, importNewCatalogItems: async rows => { writes.push(...rows); return rows.length; } }) },
   '@/lib/invoice-scan': { scanInvoiceDocument: async () => invoice },
   '@/lib/invoice-mappings': { loadInvoiceProductMappings: async () => [], rememberInvoiceProductMappings: async (_, rows) => remembered.push(...rows) },
-  '@/lib/operations-storage': { currentSalesPeriod: () => '2026-10-01', loadSales: async () => ({}), saveSales: async (_, rows) => writes.push(rows) },
+  '@/lib/operations-storage': { currentSalesPeriod: () => '2026-10-01', loadSales: async () => ({}), loadPendingSales: async () => ({}), saveSales: async (_, rows) => writes.push(rows) },
   '@/lib/price-alert-history': { recordPriceAlert: async () => {} },
   '@/lib/price-alert-notifier': { notifyPriceAlert: async () => {}, priceAlertMessage: () => null },
   '@/lib/document-bytes': { readDocumentText: async () => 'Preparat;Portii\nPui;20', readDocumentBytes: async () => { throw Error('Unexpected byte read'); } },

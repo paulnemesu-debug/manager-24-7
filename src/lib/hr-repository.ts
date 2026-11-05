@@ -2,6 +2,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { dedupeShiftsByEmployeeDay, normalizeHrEmployee, normalizeHrShift, upsertShiftForDay } from '@/lib/hr';
 import { withStorageLock } from '@/lib/storage-lock';
+import { cloudRevisionTime } from '@/lib/cloud-revision-time';
+import { OperationalError } from '@/lib/operational-sync';
 import { applyHrLifecycle, loadHrLifecycle } from '@/lib/hr-lifecycle';
 import { isDemoMode, isSupabaseConfigured, supabase } from '@/lib/supabase';
 import type { HrData, HrEmployee, HrShift } from '@/types/hr';
@@ -45,6 +47,15 @@ function canUseCloud(userId: string) {
   return userId !== 'demo' && !isDemoMode && isSupabaseConfigured && Boolean(supabase);
 }
 
+async function hrAuthorization(userId: string): Promise<string | null> {
+  if (!canUseCloud(userId) || !supabase) return null;
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    return !error && data.session?.user.id === userId && data.session.access_token
+      ? `Bearer ${data.session.access_token}` : null;
+  } catch { return null; }
+}
+
 function normalizeData(value: unknown): HrData {
   const parsed = value && typeof value === 'object' ? value as Partial<HrData> : {};
   const fallback = new Date().toISOString();
@@ -75,28 +86,45 @@ function isKnownHrCache(value: unknown) {
     && Array.isArray(parsed.shifts) && parsed.shifts.every((item: unknown) => normalizeHrShift(item) !== null);
 }
 
-async function readCache(userId: string, strict = false): Promise<{ data: HrData; known: boolean }> {
+async function readCache(userId: string, strict = false): Promise<{ data: HrData; known: boolean; raw: string | null }> {
   const raw = await AsyncStorage.getItem(keyFor(userId));
-  if (!raw) return { data: emptyData(), known: false };
+  const deleted = await readDeletes(userId);
+  if (raw === null) return { data: emptyData(), known: false, raw };
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(raw);
-    const source = parsed && typeof parsed === 'object' ? parsed as Partial<HrData> : {};
-    const normalized = normalizeData(strict ? {
-      ...source,
-      employees: Array.isArray(source.employees) ? source.employees.filter(isKnownHrEmployee) : [],
-    } : parsed);
-    const deleted = await readDeletes(userId);
-    normalized.employees = normalized.employees.filter((item) => !deleted.employees.includes(item.id));
-    const employees = new Set(normalized.employees.map((item) => item.id));
-    normalized.shifts = normalized.shifts.filter((item) => !deleted.shifts.includes(item.id) && employees.has(item.employeeId));
-    return { data: normalized, known: isKnownHrCache(parsed) };
-  } catch {
-    return { data: emptyData(), known: false };
-  }
+    parsed = JSON.parse(raw);
+  } catch { return { data: emptyData(), known: false, raw }; }
+  const source = parsed && typeof parsed === 'object' ? parsed as Partial<HrData> : {};
+  const normalized = normalizeData(strict ? {
+    ...source,
+    employees: Array.isArray(source.employees) ? source.employees.filter(isKnownHrEmployee) : [],
+  } : parsed);
+  normalized.employees = normalized.employees.filter((item) => !deleted.employees.includes(item.id) && !deleted.confirmedEmployees.includes(item.id));
+  const employees = new Set(normalized.employees.map((item) => item.id));
+  normalized.shifts = normalized.shifts.filter((item) => !deleted.shifts.includes(item.id) && !deleted.confirmedShifts.includes(item.id) && employees.has(item.employeeId));
+  return { data: normalized, known: isKnownHrCache(parsed), raw };
 }
 
 async function loadCache(userId: string): Promise<HrData> {
-  return (await readCache(userId)).data;
+  const cached = await readCache(userId);
+  if (cached.raw !== null && !cached.known) throw new OperationalError('operational.sync.invalidLocal');
+  return cached.data;
+}
+
+async function preserveRecoverySource(userId: string, raw: string) {
+  const key = `manager247.hr.recovery.v1.${userId}`;
+  const stored = await AsyncStorage.getItem(key);
+  let archive: { raw: string; recordedAt: string }[] = [];
+  if (stored !== null) {
+    try {
+      const value: unknown = JSON.parse(stored);
+      if (!Array.isArray(value) || value.some(item => !item || typeof item.raw !== 'string'
+        || typeof item.recordedAt !== 'string')) throw new Error('Invalid archive');
+      archive = value;
+    } catch { throw new OperationalError('operational.sync.invalidLocal'); }
+  }
+  if (archive.some(item => item.raw === raw)) return;
+  await AsyncStorage.setItem(key, JSON.stringify([...archive, { raw, recordedAt: new Date().toISOString() }]));
 }
 
 async function saveCache(userId: string, data: HrData) {
@@ -125,7 +153,6 @@ function employeeToRemote(userId: string, employee: HrEmployee) {
     net_salary: employee.netSalary,
     active: employee.active,
     created_at: employee.createdAt,
-    updated_at: employee.updatedAt,
   };
 }
 
@@ -141,17 +168,60 @@ function shiftToRemote(userId: string, shift: HrShift) {
     actual_end: shift.actualEnd,
     status: shift.status,
     notes: shift.notes,
-    updated_at: shift.updatedAt,
   };
 }
 
-function latestById<T extends { id: string; updatedAt: string }>(local: readonly T[], remote: readonly T[]) {
+function latestById<T extends { id: string; updatedAt: string; syncState?: string }>(local: readonly T[], remote: readonly T[]) {
   const merged = new Map(remote.map((item) => [item.id, item]));
   for (const item of local) {
     const other = merged.get(item.id);
-    if (!other || item.updatedAt > other.updatedAt) merged.set(item.id, item);
+    if (!other || item.syncState === 'pending' || item.syncState === 'local'
+      || (cloudRevisionTime(item.updatedAt) ?? -1n) > (cloudRevisionTime(other.updatedAt) ?? -1n)) merged.set(item.id, item);
   }
   return [...merged.values()];
+}
+
+async function replayPendingHr<T extends { id: string; syncState?: string }, R extends { id: string; updated_at: string }>(
+  table: 'hr_employees' | 'hr_shifts', columns: string, userId: string, authorization: string,
+  local: T[], remote: T[], identity: (item: T) => string,
+  toRemote: (userId: string, item: T) => Record<string, unknown>,
+  fromRemote: (row: R) => T, valid: (value: unknown) => boolean,
+): Promise<T[]> {
+  const result = new Map(local.map(item => [item.id, item]));
+  const remoteByKey = new Map(remote.map(item => [identity(item), item]));
+  const pending = local.filter(item => item.syncState !== 'synced');
+  for (let offset = 0; offset < pending.length; offset += 50) {
+    const batch = pending.slice(offset, offset + 50);
+    const ids = batch.map(item => remoteByKey.get(identity(item))?.id ?? item.id);
+    try {
+      const checked = await supabase!.from(table).select(columns).eq('user_id', userId).in('id', ids)
+        .limit(50).setHeader('Authorization', authorization);
+      if (checked.error || !Array.isArray(checked.data)) continue;
+      const rows = checked.data as unknown as R[];
+      if (rows.some(row => !valid(row) || !ids.includes(row.id) || cloudRevisionTime(row.updated_at) === null)
+        || new Set(rows.map(row => row.id)).size !== rows.length) continue;
+      const verified = new Map(rows.map(row => { const item = fromRemote(row); return [identity(item), item]; }));
+      for (const item of batch) {
+        const cloud = verified.get(identity(item));
+        if (cloud) {
+          const localPayload = toRemote(userId, item);
+          const cloudPayload = toRemote(userId, cloud);
+          if (Object.keys(localPayload).filter(key => key !== 'id' && key !== 'created_at')
+            .every(key => localPayload[key] === cloudPayload[key])) result.set(item.id, cloud);
+          continue;
+        }
+        // An existing differing record requires an explicit save. A missing ID
+        // is insert-only so a stale read cannot overwrite it or bypass the deletion ledger.
+        const saved = await supabase!.from(table).insert(toRemote(userId, item)).select(columns).single()
+          .setHeader('Authorization', authorization);
+        const row = saved.data as unknown as R | null;
+        if (!saved.error && row && row.id === item.id && valid(row) && cloudRevisionTime(row.updated_at) !== null) {
+          result.set(item.id, fromRemote(row));
+        }
+      }
+    } catch { /* Keep pending intent after a failed read, collision, or insert. */ }
+  }
+  return local.map(item => result.get(item.id)!);
 }
 
 type HrLoadOptions = { requireKnownEmployees?: boolean };
@@ -160,83 +230,61 @@ async function loadHrDataUnlocked(userId: string, options: HrLoadOptions): Promi
   const cached = await readCache(userId, options.requireKnownEmployees);
   const local = cached.data;
   if (!canUseCloud(userId) || !supabase) return local;
+  const authorization = await hrAuthorization(userId);
+  if (!authorization) {
+    if (options.requireKnownEmployees && !cached.known) throw new Error('HR employee data is unavailable without a valid local cache.');
+    return local;
+  }
 
-  await flushDeletes(userId);
+  await flushDeletes(userId, authorization);
   const results = await Promise.all([
-    readAllHrRows('hr_employees', employeeColumns, userId),
-    readAllHrRows('hr_shifts', shiftColumns, userId),
-    supabase.rpc('list_hr_deletions'),
+    readAllHrRows('hr_employees', employeeColumns, userId, authorization),
+    readAllHrRows('hr_shifts', shiftColumns, userId, authorization),
+    supabase.rpc('list_hr_deletions').setHeader('Authorization', authorization),
   ]).catch((error: unknown) => {
     if (!options.requireKnownEmployees || !cached.known) throw error;
     return null;
   });
   if (!results) return local;
   const [employeeResult, shiftResult, deletedResult] = results;
-  if (employeeResult.error || shiftResult.error || deletedResult.error) {
+  if (employeeResult.error || shiftResult.error || deletedResult.error
+    || !Array.isArray(employeeResult.data) || !Array.isArray(shiftResult.data) || !Array.isArray(deletedResult.data)) {
     if (options.requireKnownEmployees && !cached.known) throw new Error('HR employee data is unavailable without a valid local cache.');
     return local;
   }
-  const deletedEmployees = new Set<string>();
-  const deletedShifts = new Set<string>();
+  if (cached.raw !== null && !cached.known) await preserveRecoverySource(userId, cached.raw);
+  const deletionQueue = await readDeletes(userId);
+  const deletedEmployees = new Set([...deletionQueue.employees, ...deletionQueue.confirmedEmployees]);
+  const deletedShifts = new Set([...deletionQueue.shifts, ...deletionQueue.confirmedShifts]);
   for (const item of deletedResult.data ?? []) {
     (item.entity === 'hr_employees' ? deletedEmployees : deletedShifts).add(String(item.row_id));
+  }
+  // A stale list or deletion-ledger response must not undo an acknowledged deletion.
+  const confirmedEmployees = [...new Set([...deletionQueue.confirmedEmployees,
+    ...(deletedResult.data ?? []).filter((item: { entity: string }) => item.entity === 'hr_employees').map((item: { row_id: string }) => String(item.row_id))])];
+  const confirmedShifts = [...new Set([...deletionQueue.confirmedShifts,
+    ...(deletedResult.data ?? []).filter((item: { entity: string }) => item.entity === 'hr_shifts').map((item: { row_id: string }) => String(item.row_id))])];
+  if (confirmedEmployees.length !== deletionQueue.confirmedEmployees.length || confirmedShifts.length !== deletionQueue.confirmedShifts.length) {
+    await writeDeletes(userId, { ...deletionQueue, confirmedEmployees, confirmedShifts });
   }
   local.employees = local.employees.filter((item) => !deletedEmployees.has(item.id));
   const localEmployeeIds = new Set(local.employees.map((item) => item.id));
   local.shifts = local.shifts.filter((item) => !deletedShifts.has(item.id) && localEmployeeIds.has(item.employeeId));
 
-  let remoteEmployees = (employeeResult.data as RemoteEmployee[]).map(employeeFromRemote);
-  let remoteShifts = (shiftResult.data as RemoteShift[]).map(shiftFromRemote);
-  const remoteEmployeeById = new Map(remoteEmployees.map((item) => [item.id, item]));
+  const remoteEmployees = (employeeResult.data as RemoteEmployee[]).map(employeeFromRemote).filter((item) => !deletedEmployees.has(item.id));
+  const remoteShifts = (shiftResult.data as RemoteShift[]).map(shiftFromRemote)
+    .filter((item) => !deletedShifts.has(item.id) && !deletedEmployees.has(item.employeeId));
+  local.employees = await replayPendingHr('hr_employees', employeeColumns, userId, authorization,
+    local.employees, remoteEmployees, item => item.id, employeeToRemote, employeeFromRemote, isKnownHrEmployee);
+  local.shifts = await replayPendingHr('hr_shifts', shiftColumns, userId, authorization,
+    local.shifts, remoteShifts, item => `${item.employeeId}:${item.workDate}`, shiftToRemote, shiftFromRemote,
+    value => normalizeHrShift(value) !== null);
 
-  const employeesToUpload = local.employees.filter((item) => {
-    const remote = remoteEmployeeById.get(item.id);
-    return item.syncState !== 'synced' && (!remote || item.updatedAt > remote.updatedAt);
-  });
-  if (employeesToUpload.length) {
-    const { data } = await supabase
-      .from('hr_employees')
-      .upsert(employeesToUpload.map((item) => employeeToRemote(userId, item)), { onConflict: 'id' })
-      .select(employeeColumns);
-    if (data) {
-      const saved = (data as RemoteEmployee[]).map(employeeFromRemote);
-      const byId = new Map(saved.map((item) => [item.id, item]));
-      local.employees = local.employees.map((item) => byId.get(item.id) ?? item);
-      remoteEmployees = latestById(remoteEmployees, saved);
-    }
-  }
-
-  const remoteShiftByDay = new Map(remoteShifts.map((item) => [`${item.employeeId}:${item.workDate}`, item]));
-  const remoteShiftById = new Map(remoteShifts.map((item) => [item.id, item]));
-  const shiftsToUpload = local.shifts
-    .map((item) => {
-      const remote = remoteShiftByDay.get(`${item.employeeId}:${item.workDate}`);
-      return remote && remote.id !== item.id ? { ...item, id: remote.id } : item;
-    })
-    .filter((item) => {
-      const remote = remoteShiftByDay.get(`${item.employeeId}:${item.workDate}`);
-      return item.syncState !== 'synced' && (!remote || item.updatedAt > remote.updatedAt);
-    });
-  if (shiftsToUpload.length) {
-    const savedShifts: HrShift[] = [];
-    for (const item of shiftsToUpload) {
-      const payload = shiftToRemote(userId, item);
-      const result = remoteShiftById.has(item.id)
-        ? await supabase.from('hr_shifts').update(payload).eq('id', item.id).eq('user_id', userId).select(shiftColumns).single()
-        : await supabase.from('hr_shifts').upsert(payload, { onConflict: 'user_id,employee_id,work_date' }).select(shiftColumns).single();
-      if (result.data) savedShifts.push(shiftFromRemote(result.data as RemoteShift));
-    }
-    const byDay = new Map(savedShifts.map((item) => [`${item.employeeId}:${item.workDate}`, item]));
-    local.shifts = local.shifts.map((item) => byDay.get(`${item.employeeId}:${item.workDate}`) ?? item);
-    remoteShifts = dedupeShiftsByEmployeeDay(latestById(remoteShifts, savedShifts));
-  }
-
-  const retainedEmployees = local.employees.filter((item) => item.syncState !== 'synced' || remoteEmployees.some((remote) => remote.id === item.id));
-  const retainedShifts = local.shifts.filter((item) => item.syncState !== 'synced' || remoteShifts.some((remote) => remote.id === item.id));
-  const employees = latestById(retainedEmployees, remoteEmployees)
+  // Missing list rows are not deletion evidence; the explicit ledger above is authoritative.
+  const employees = latestById(local.employees, remoteEmployees)
     .sort((left, right) => left.name.localeCompare(right.name, 'ro-RO'));
   const employeeIds = new Set(employees.map((item) => item.id));
-  const shifts = dedupeShiftsByEmployeeDay(latestById(retainedShifts, remoteShifts))
+  const shifts = dedupeShiftsByEmployeeDay(latestById(local.shifts, remoteShifts))
     .filter((item) => employeeIds.has(item.employeeId));
   return saveCache(userId, { employees, shifts });
 }
@@ -263,11 +311,13 @@ async function saveHrEmployeeUnlocked(
   await saveCache(userId, { ...data, employees: [employee, ...data.employees.filter((item) => item.id !== employee.id)] });
 
   if (canUseCloud(userId) && supabase) {
+    const authorization = await hrAuthorization(userId);
+    if (!authorization) return employee;
     const { data: saved } = await supabase
       .from('hr_employees')
       .upsert(employeeToRemote(userId, employee), { onConflict: 'id' })
       .select(employeeColumns)
-      .single();
+      .single().setHeader('Authorization', authorization);
     if (saved) employee = employeeFromRemote(saved as RemoteEmployee);
   }
   const current = await loadCache(userId);
@@ -290,17 +340,19 @@ async function saveHrShiftUnlocked(userId: string, draft: Omit<HrShift, 'id' | '
   await saveCache(userId, { ...data, shifts: upsertShiftForDay(data.shifts, shift) });
 
   if (canUseCloud(userId) && supabase) {
+    const authorization = await hrAuthorization(userId);
+    if (!authorization) return shift;
     let result = await supabase
       .from('hr_shifts')
       .upsert(shiftToRemote(userId, shift), { onConflict: existing ? 'id' : 'user_id,employee_id,work_date' })
       .select(shiftColumns)
-      .single();
+      .single().setHeader('Authorization', authorization);
     if (result.error && existing) {
       result = await supabase
         .from('hr_shifts')
         .upsert(shiftToRemote(userId, shift), { onConflict: 'user_id,employee_id,work_date' })
         .select(shiftColumns)
-        .single();
+        .single().setHeader('Authorization', authorization);
     }
     if (result.data) shift = shiftFromRemote(result.data as RemoteShift);
   }
@@ -310,40 +362,57 @@ async function saveHrShiftUnlocked(userId: string, draft: Omit<HrShift, 'id' | '
 }
 
 
-type Deletes = { employees: string[]; shifts: string[] };
+type Deletes = { employees: string[]; shifts: string[]; confirmedEmployees: string[]; confirmedShifts: string[] };
 const deletionKey = (userId: string) => `manager247.hr.deletions.v1.${userId}`;
 
 async function readDeletes(userId: string): Promise<Deletes> {
   try {
     const raw = await AsyncStorage.getItem(deletionKey(userId));
-    const value = raw ? JSON.parse(raw) : {};
-    return { employees: Array.isArray(value.employees) ? value.employees : [], shifts: Array.isArray(value.shifts) ? value.shifts : [] };
-  } catch { return { employees: [], shifts: [] }; }
+    const value = raw === null ? {} : JSON.parse(raw);
+    if (!value || typeof value !== 'object' || Array.isArray(value) || (raw !== null
+      && ['employees', 'shifts', 'confirmedEmployees', 'confirmedShifts'].some(key =>
+        value[key] !== undefined && (!Array.isArray(value[key]) || value[key].some((id: unknown) => typeof id !== 'string'))))) {
+      throw new Error('Invalid deletion queue');
+    }
+    return {
+      employees: Array.isArray(value.employees) ? value.employees : [],
+      shifts: Array.isArray(value.shifts) ? value.shifts : [],
+      confirmedEmployees: Array.isArray(value.confirmedEmployees) ? value.confirmedEmployees : [],
+      confirmedShifts: Array.isArray(value.confirmedShifts) ? value.confirmedShifts : [],
+    };
+  } catch { throw new OperationalError('operational.sync.invalidLocal'); }
 }
 
 async function writeDeletes(userId: string, value: Deletes) {
   await AsyncStorage.setItem(deletionKey(userId), JSON.stringify(value));
 }
 
-async function flushDeletes(userId: string) {
+async function flushDeletes(userId: string, capturedAuthorization?: string) {
   if (!canUseCloud(userId) || !supabase) return;
+  const authorization = capturedAuthorization ?? await hrAuthorization(userId);
+  if (!authorization) return;
   const queue = await readDeletes(userId);
   for (const kind of ['employees', 'shifts'] as const) {
     for (const id of [...queue[kind]]) {
       try {
-        const result = await supabase.from(kind === 'employees' ? 'hr_employees' : 'hr_shifts').delete().eq('id', id).eq('user_id', userId);
-        if (!result.error) { queue[kind] = queue[kind].filter((item) => item !== id); await writeDeletes(userId, queue); }
+        const result = await supabase.from(kind === 'employees' ? 'hr_employees' : 'hr_shifts').delete().eq('id', id).eq('user_id', userId).setHeader('Authorization', authorization);
+        if (!result.error) {
+          queue[kind] = queue[kind].filter((item) => item !== id);
+          const confirmed = kind === 'employees' ? 'confirmedEmployees' : 'confirmedShifts';
+          queue[confirmed] = [...new Set([...queue[confirmed], id])];
+          await writeDeletes(userId, queue);
+        }
       } catch { /* Retain durable delete intent for the next connection. */ }
     }
   }
 }
 
-async function readAllHrRows(table: string, columns: string, userId: string) {
+async function readAllHrRows(table: string, columns: string, userId: string, authorization: string) {
   const result: Record<string, unknown>[] = [];
   if (!supabase) return { data: result, error: 'not-configured' };
   try {
     for (let offset = 0; ; offset += 500) {
-      const page = await supabase.from(table).select(columns).eq('user_id', userId).order('id').range(offset, offset + 499);
+      const page = await supabase.from(table).select(columns).eq('user_id', userId).order('id').range(offset, offset + 499).setHeader('Authorization', authorization);
       if (page.error) return { data: result, error: page.error };
       result.push(...((page.data ?? []) as unknown as Record<string, unknown>[]));
       if ((page.data?.length ?? 0) < 500) return { data: result, error: null };

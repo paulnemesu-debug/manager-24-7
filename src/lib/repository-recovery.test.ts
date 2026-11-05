@@ -23,10 +23,13 @@ function query(table: string) {
   let start = 0;
   let end = Number.MAX_SAFE_INTEGER;
   const filters: [string, unknown][] = [];
+  const inclusionFilters: [string, readonly unknown[]][] = [];
   const run = (): Result => {
     if (!state.online) return { data: null, error: { message: 'Network request failed' } };
     let rows = state.rows[table] ?? [];
-    if (operation === 'write') {
+    if (operation === 'write' || operation === 'insert') {
+      if (operation === 'insert' && values.some(value => rows.some(row => row.id === value.id))) return { data: null, error: { message: 'Duplicate ID' } };
+      if (table === 'stock_policies') values = values.map(value => ({ ...value, updated_at: '2026-11-05T05:00:00.123456+00:00' }));
       values.forEach((value) => {
         state.writes.push({ table, id: value.id });
         rows = [value, ...rows.filter((item) => item.id !== value.id)];
@@ -34,7 +37,8 @@ function query(table: string) {
       state.rows[table] = rows;
       return { data: one ? values[0] : values, error: null };
     }
-    const selected = rows.filter((item) => filters.every(([key, value]) => item[key] === value));
+    const selected = rows.filter((item) => filters.every(([key, value]) => item[key] === value)
+      && inclusionFilters.every(([key, values]) => values.includes(item[key])));
     if (operation === 'delete') {
       selected.forEach((value) => state.deleted.push({ entity: table, row_id: String(value.id) }));
       state.rows[table] = rows.filter((item) => !selected.includes(item));
@@ -46,10 +50,13 @@ function query(table: string) {
   const builder = {
     select: (_columns?: string) => builder,
     eq: (key: string, value: unknown) => { filters.push([key, value]); return builder; },
+    in: (key: string, values: readonly unknown[]) => { inclusionFilters.push([key, values]); return builder; },
+    setHeader: (_key: string, _value: string) => builder,
     order: (_key: string, _options?: unknown) => builder,
     limit: (_amount: number) => builder,
     range: (from: number, to: number) => { start = from; end = to; return builder; },
     upsert: (input: Record<string, unknown> | Record<string, unknown>[], _options?: unknown) => { operation = 'write'; values = Array.isArray(input) ? input : [input]; return builder; },
+    insert: (input: Record<string, unknown> | Record<string, unknown>[]) => { operation = 'insert'; values = Array.isArray(input) ? input : [input]; return builder; },
     update: (input: Record<string, unknown>) => { operation = 'write'; values = [input]; return builder; },
     delete: () => { operation = 'delete'; return builder; },
     single: () => { one = true; return builder; },
@@ -60,8 +67,17 @@ function query(table: string) {
 }
 
 vi.mock('@/lib/supabase', () => ({ isDemoMode: false, isSupabaseConfigured: true, supabase: {
+  auth: { getSession: async () => ({ data: { session: { user: { id: 'recovery-test' }, access_token: 'fixture-token' } }, error: null }) },
   from: (table: string) => query(table),
-  rpc: async () => ({ data: state.online ? state.deleted : null, error: state.online ? null : { message: 'offline' } }),
+  rpc: () => {
+    const request = {
+      setHeader: () => request,
+      then: (resolve: (value: unknown) => unknown) => Promise.resolve({
+        data: state.online ? state.deleted : null, error: state.online ? null : { message: 'offline' },
+      }).then(resolve),
+    };
+    return request;
+  },
 } }));
 
 import { saveStockPolicy, loadOperationsControlData } from '@/lib/operations-control-repository';

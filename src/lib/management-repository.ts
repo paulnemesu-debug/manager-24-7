@@ -10,6 +10,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { isDemoMode, isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { withStorageLock } from '@/lib/storage-lock';
 import { OperationalError } from '@/lib/operational-sync';
+import { isIsoDate } from '@/lib/local-date-time';
 import type { InventoryLine, SalesLine } from '@/lib/management-control';
 
 export type ManagementSnapshot = {
@@ -26,10 +27,14 @@ export type ManagementSnapshot = {
   kind?: 'daily' | 'inventory';
   notes?: string;
   /** IDs are written durably before the first cloud attempt. */
-  syncFormat?: 2;
+  syncFormat?: 2 | 3;
   laborIds?: string[];
   /** Older versions used random server IDs; replay needs explicit reconciliation. */
-  syncIssue?: 'legacy_daily_requires_review';
+  syncIssue?: 'legacy_daily_requires_review' | 'daily_conflict' | 'daily_rejected';
+  serverVersion?: number;
+  requestId?: string;
+  promote?: boolean;
+  remoteConflict?: Omit<ManagementSnapshot, 'remoteConflict'>;
 };
 
 const keyFor = (userId: string) => `manager247.management.v1.${userId}`;
@@ -63,7 +68,7 @@ async function writeCache(userId: string, snapshots: ManagementSnapshot[]) {
   let syncedManagement = 0;
   const retained = snapshots.filter((item) => {
     if (item.syncState !== 'synced') return true;
-    if (item.kind !== 'inventory') return ++syncedManagement <= syncedHistoryLimit;
+    if (item.kind !== 'inventory') return item.syncFormat !== 3 || ++syncedManagement <= syncedHistoryLimit;
     const count = (syncedInventoryByLocation.get(item.locationId) ?? 0) + 1;
     syncedInventoryByLocation.set(item.locationId, count);
     return count <= syncedHistoryLimit;
@@ -78,11 +83,15 @@ async function cache(userId: string, snapshot: ManagementSnapshot) {
 }
 
 function isLegacyDaily(snapshot: ManagementSnapshot) {
-  return snapshot.syncFormat !== 2 && (snapshot.sales.length > 0 || snapshot.labor.length > 0);
+  return snapshot.syncFormat === undefined && (snapshot.sales.length > 0 || snapshot.labor.length > 0);
+}
+
+export function isManagementDay(snapshot: ManagementSnapshot) {
+  return snapshot.kind === 'daily' || isLegacyDaily(snapshot);
 }
 
 /** Every cloud mutation is an upsert by a durable ID, including partial retries. */
-async function upload(userId: string, snapshot: ManagementSnapshot): Promise<boolean | string> {
+async function upload(userId: string, snapshot: ManagementSnapshot, authorization?: string): Promise<boolean | string> {
   if (!canSync(userId) || !supabase || isLegacyDaily(snapshot)) return false;
   const client = supabase;
   const daily = snapshot.kind === 'daily';
@@ -97,6 +106,7 @@ async function upload(userId: string, snapshot: ManagementSnapshot): Promise<boo
       status: 'confirmed', lines: snapshot.inventory, total_value: Math.round(totalValue * 100) / 100,
       notes: snapshot.notes?.trim() || null,
     }, { onConflict: 'id' });
+    if (authorization) inventoryWrite.setHeader('Authorization', authorization);
     if (!daily) {
       const { data, error } = await inventoryWrite.select('updated_at').single();
       return error ? false : data?.updated_at ?? true;
@@ -105,11 +115,13 @@ async function upload(userId: string, snapshot: ManagementSnapshot): Promise<boo
     if (inventory.error) return false;
 
     const revenue = snapshot.sales.reduce((sum, line) => sum + Math.max(0, line.revenue), 0);
-    const sales = await client.from('sales_imports').upsert({
+    const salesWrite = client.from('sales_imports').upsert({
       id: snapshot.id, user_id: userId, location_id: snapshot.locationId,
       period_start: snapshot.date, period_end: snapshot.date, source_name: 'Manager 24/7',
       column_mapping: {}, rows: snapshot.sales, total_revenue: Math.round(revenue * 100) / 100,
     }, { onConflict: 'id' });
+    if (authorization) salesWrite.setHeader('Authorization', authorization);
+    const sales = await salesWrite;
     if (sales.error) return false;
     const laborRows = snapshot.labor.flatMap((row, index) => row.employeeName.trim() ? [{
       id: snapshot.laborIds![index], user_id: userId, location_id: snapshot.locationId,
@@ -117,7 +129,9 @@ async function upload(userId: string, snapshot: ManagementSnapshot): Promise<boo
       hours: row.hours, hourly_cost: row.hourlyCost,
     }] : []);
     if (laborRows.length) {
-      const labor = await client.from('labor_entries').upsert(laborRows, { onConflict: 'id' });
+      const laborWrite = client.from('labor_entries').upsert(laborRows, { onConflict: 'id' });
+      if (authorization) laborWrite.setHeader('Authorization', authorization);
+      const labor = await laborWrite;
       if (labor.error) return false;
     }
     return true;
@@ -129,7 +143,7 @@ async function upload(userId: string, snapshot: ManagementSnapshot): Promise<boo
 async function loadManagementSnapshotsUnlocked(userId: string, locationId?: string | null): Promise<ManagementSnapshot[]> {
   let snapshots = await readCache(userId);
   if (!canSync(userId)) return snapshots;
-  for (const snapshot of snapshots.filter((item) => item.syncState !== 'synced')) {
+  for (const snapshot of snapshots.filter((item) => item.syncState !== 'synced' && item.syncFormat !== 3)) {
     if (isLegacyDaily(snapshot)) {
       snapshot.syncIssue = 'legacy_daily_requires_review';
     } else {
@@ -158,6 +172,15 @@ type InventoryCountRow = {
   updated_at: string;
 };
 
+type DailyCountRow = InventoryCountRow & {
+  daily_report: {
+    version: number;
+    scope: string;
+    sales: SalesLine[];
+    labor: (ManagementSnapshot['labor'][number] & { id: string })[];
+  };
+};
+
 function isInventoryLine(value: unknown): value is InventoryLine {
   if (!value || typeof value !== 'object') return false;
   const line = value as Partial<InventoryLine>;
@@ -178,7 +201,7 @@ function inventoryMatches(existing: ManagementSnapshot, row: InventoryCountRow, 
 
 async function loadCloudInventory(userId: string, snapshots: ManagementSnapshot[], locationId?: string | null): Promise<ManagementSnapshot[]> {
   if (!supabase) return snapshots;
-  const query = supabase.from('inventory_counts')
+  const query = supabase.from('management_physical_inventory')
     .select('id,user_id,location_id,counted_at,lines,notes,updated_at')
     .eq('user_id', userId)
     .eq('status', 'confirmed');
@@ -218,31 +241,174 @@ async function loadCloudInventory(userId: string, snapshots: ManagementSnapshot[
 }
 
 export const loadManagementSnapshots = (userId: string, options: { locationId?: string | null } = {}) =>
-  withStorageLock(keyFor(userId), () => loadManagementSnapshotsUnlocked(userId, options.locationId));
+  withStorageLock(keyFor(userId), async () => {
+    const snapshots = await loadManagementSnapshotsUnlocked(userId, options.locationId);
+    return options.locationId === undefined ? snapshots : snapshots.filter(item => !isManagementDay(item));
+  });
 
-export async function saveManagementSnapshot(
-  userId: string,
-  input: Omit<ManagementSnapshot, 'updatedAt' | 'syncState'>,
-) {
-  return withStorageLock(keyFor(userId), async () => {
-    const previous = (await readCache(userId)).find((item) => item.id === input.id);
-    if (previous && isLegacyDaily(previous)) {
-      // Do not turn an ambiguous old partial upload into a new set of cloud rows.
-      const unresolved = { ...previous, syncIssue: 'legacy_daily_requires_review' as const };
-      await cache(userId, unresolved);
-      return unresolved;
+function dailyFromRow(row: DailyCountRow, userId: string): ManagementSnapshot | undefined {
+  const report = row.daily_report;
+  if (row.user_id !== userId || !report || typeof report.scope !== 'string' || !Number.isInteger(report.version) || report.version < 1
+    || !Array.isArray(row.lines) || !row.lines.every(isInventoryLine)
+    || !Array.isArray(report.sales) || !report.sales.every(line => line && typeof line.name === 'string'
+      && [line.quantity, line.revenue, line.theoreticalUnitCost].every(Number.isFinite))
+    || !Array.isArray(report.labor) || !report.labor.every(line => line && typeof line.id === 'string'
+      && typeof line.employeeName === 'string' && typeof line.role === 'string'
+      && [line.hours, line.hourlyCost].every(Number.isFinite))) return;
+  return {
+    id: row.id, date: row.counted_at, locationId: report.scope === 'general' ? null : report.scope, inventory: row.lines, sales: report.sales,
+    labor: report.labor.map(({ id: _id, ...line }) => line), laborIds: report.labor.map(line => line.id),
+    notes: row.notes ?? undefined, updatedAt: row.updated_at, syncState: 'synced', kind: 'daily',
+    syncFormat: 3, serverVersion: report.version,
+  };
+}
+
+function dailyPayload(snapshot: Pick<ManagementSnapshot, 'inventory' | 'sales' | 'labor' | 'laborIds'>) {
+  return {
+    inventory: snapshot.inventory,
+    sales: snapshot.sales,
+    labor: snapshot.labor.map((row, index) => ({ ...row, ...(snapshot.laborIds?.[index] ? { id: snapshot.laborIds[index] } : {}) })),
+  };
+}
+
+async function managementAuthorization(userId: string) {
+  if (!canSync(userId) || !supabase) return;
+  const { data, error } = await supabase.auth.getSession();
+  if (!error && data.session?.user.id === userId && data.session.access_token) return `Bearer ${data.session.access_token}`;
+}
+
+async function syncDay(userId: string, snapshot: ManagementSnapshot): Promise<ManagementSnapshot> {
+  if (!supabase) return snapshot;
+  try {
+    const authorization = await managementAuthorization(userId);
+    if (!authorization) return snapshot;
+    const { inventory, sales, labor } = dailyPayload(snapshot);
+    const { data, error, status } = await supabase.rpc('foodcost_save_management_day', {
+      p_owner: userId, p_id: snapshot.id, p_location: snapshot.locationId, p_date: snapshot.date,
+      p_expected_version: snapshot.serverVersion ?? 0, p_request_id: snapshot.requestId,
+      p_inventory: inventory, p_sales: sales, p_labor: labor, p_promote: Boolean(snapshot.promote),
+    }).setHeader('Authorization', authorization);
+    if (error) {
+      return status === 0 || status === 408 || status === 429 || status >= 500
+        ? snapshot : { ...snapshot, syncIssue: 'daily_rejected' };
     }
-    let snapshot: ManagementSnapshot = {
-      ...input, kind: 'daily', syncFormat: 2,
-      laborIds: input.labor.map((_, index) => previous?.laborIds?.[index] ?? uuid()),
-      updatedAt: new Date().toISOString(), syncState: canSync(userId) ? 'pending' : 'local', syncIssue: undefined,
-    };
-    await cache(userId, snapshot);
-    if (await upload(userId, snapshot)) {
-      snapshot = { ...snapshot, syncState: 'synced' };
-      await cache(userId, snapshot);
+    const remote = data?.record ? dailyFromRow(data.record as DailyCountRow, userId) : undefined;
+    if (data?.applied === true && remote?.id === snapshot.id && remote.date === snapshot.date && remote.locationId === snapshot.locationId) return remote;
+    if (data?.applied === false && (!remote || (remote.date === snapshot.date && remote.locationId === snapshot.locationId))) {
+      return { ...snapshot, syncIssue: 'daily_conflict', remoteConflict: remote };
     }
     return snapshot;
+  } catch {
+    return snapshot;
+  }
+}
+
+export function loadManagementDailySnapshots(userId: string): Promise<ManagementSnapshot[]> {
+  return withStorageLock(keyFor(userId), async () => {
+    const snapshots = await readCache(userId);
+    const merged = new Map(snapshots.map(item => [item.id, item]));
+    if (!canSync(userId) || !supabase) return snapshots.filter(isManagementDay);
+    const authorization = await managementAuthorization(userId).catch(() => undefined);
+    let changed = false;
+    for (const item of snapshots) {
+      if (item.syncFormat === 3 && item.syncState === 'pending' && !item.syncIssue) {
+        const saved = await syncDay(userId, item);
+        if (saved !== item) {
+          merged.set(item.id, saved);
+          changed = true;
+        }
+      } else if (item.syncState === 'pending' && isLegacyDaily(item) && !item.syncIssue) {
+        merged.set(item.id, { ...item, syncIssue: 'legacy_daily_requires_review' });
+        changed = true;
+      } else if (item.syncFormat === 2 && item.kind === 'daily' && item.syncState === 'pending' && authorization) {
+        if (await upload(userId, item, authorization)) {
+          merged.set(item.id, { ...item, syncState: 'synced' });
+          changed = true;
+        }
+      }
+    }
+    if (authorization) {
+      for (let offset = 0; ; offset += 100) {
+        const { data, error } = await supabase.from('inventory_counts')
+          .select('id,user_id,location_id,counted_at,lines,notes,updated_at,daily_report').eq('user_id', userId)
+          .not('daily_report', 'is', null).eq('status', 'confirmed')
+          .order('id').range(offset, offset + 99).setHeader('Authorization', authorization);
+        if (error || !data?.length) break;
+        for (const row of data as DailyCountRow[]) {
+          const incoming = dailyFromRow(row, userId);
+          if (!incoming) continue;
+          const local = merged.get(incoming.id);
+          if (local?.syncState === 'pending' && local.syncFormat === 3) {
+            if (local.syncIssue === 'daily_conflict' && incoming.serverVersion! > (local.remoteConflict?.serverVersion ?? 0)) {
+              merged.set(incoming.id, { ...local, remoteConflict: incoming });
+              changed = true;
+            }
+            continue;
+          }
+          if (!local || incoming.serverVersion! > (local.serverVersion ?? 0)) {
+            merged.set(incoming.id, incoming);
+            changed = true;
+          }
+        }
+        if (data.length < 100) break;
+      }
+    }
+    const records = [...merged.values()].sort((left, right) =>
+      right.date.localeCompare(left.date) || Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
+    if (changed) await writeCache(userId, records);
+    return records.filter(isManagementDay);
+  });
+}
+
+type ManagementDayInput = Pick<ManagementSnapshot, 'id' | 'date' | 'locationId' | 'inventory' | 'sales' | 'labor' | 'laborIds' | 'serverVersion' | 'notes' | 'promote'>;
+
+export class ManagementDayPendingError extends Error {}
+
+export async function saveManagementSnapshot(userId: string, input: ManagementDayInput) {
+  return withStorageLock(keyFor(userId), async () => {
+    if (!isIsoDate(input.date)) throw new OperationalError('operational.sync.invalidRecord');
+    let previous = (await readCache(userId)).find((item) => item.id === input.id);
+    if (previous && (previous.date !== input.date || previous.locationId !== input.locationId)) {
+      throw new OperationalError('operational.sync.invalidRecord');
+    }
+    if (previous?.syncIssue === 'daily_conflict') return previous;
+    if (previous?.syncFormat === 3 && previous.syncState === 'pending' && !previous.syncIssue) {
+      const pending = previous;
+      const settled = await syncDay(userId, pending);
+      if (settled !== pending) await cache(userId, settled);
+      if (settled.syncIssue) return settled;
+      if (JSON.stringify(dailyPayload(pending)) === JSON.stringify(dailyPayload(input))) return settled;
+      if (settled.syncState !== 'synced') throw new ManagementDayPendingError();
+      previous = settled;
+      input = { ...input, serverVersion: settled.serverVersion, laborIds: settled.laborIds };
+    }
+    if (previous && previous.syncFormat !== 3 && previous.syncState !== 'local' && !input.promote) {
+      throw new OperationalError('operational.sync.resolveFirst');
+    }
+    let snapshot: ManagementSnapshot = {
+      ...input, kind: 'daily', syncFormat: 3, requestId: uuid(), updatedAt: new Date().toISOString(),
+      syncState: canSync(userId) ? 'pending' : 'local',
+    };
+    await cache(userId, snapshot);
+    if (snapshot.syncState === 'pending') {
+      const saved = await syncDay(userId, snapshot);
+      if (saved !== snapshot) {
+        snapshot = saved;
+        await cache(userId, snapshot);
+      }
+    }
+    return snapshot;
+  });
+}
+
+export function acceptRemoteManagementDay(userId: string, id: string) {
+  return withStorageLock(keyFor(userId), async () => {
+    const items = await readCache(userId);
+    const local = items.find(item => item.id === id);
+    if (!local?.remoteConflict) return;
+    const remote = local.remoteConflict;
+    await writeCache(userId, [remote, ...items.filter(item => item.id !== id && item.id !== remote.id)]);
+    return remote;
   });
 }
 

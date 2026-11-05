@@ -22,6 +22,8 @@ function query(table: string) {
   const filters:[string,any][]=[];
   const builder:any = {
     select: () => builder, eq: (key:string,value:any) => { filters.push([key,value]); return builder; },
+    in: (key:string,value:any[]) => { filters.push([key,value]); return builder; },
+    setHeader: () => builder,
     order: () => builder, limit: (n:number) => {cap=n; return builder;},
     range: (a:number,b:number) => { start=a; end=b; return builder; },
     upsert: (input:any) => {op='upsert';values=Array.isArray(input)?input:[input];return builder;},
@@ -32,15 +34,19 @@ function query(table: string) {
     then: (resolve:any,reject:any) => Promise.resolve().then(() => {
       state.calls.push({table,op,values:structuredClone(values),filters,online:state.online});
       if(!state.online) return {data:null,error:new Error('InjectedOffline')};
-      let rows=state.rows[table]??[];
-      const matches=(r:any)=>filters.every(([k,v])=>r[k]===v);
+      let rows=state.rows[table==='management_physical_inventory'?'inventory_counts':table]??[];
+      const matches=(r:any)=>filters.every(([k,v])=>Array.isArray(v)?v.includes(r[k]):r[k]===v);
+      if(op==='upsert'||op==='insert'||op==='update') values.forEach(v=>{v.updated_at='2026-11-05T12:00:00.000000Z';});
       if(op==='upsert') {
         values.forEach((v:any)=>{
           const keys = v.id ? ['id'] : v.recipe_id ? ['user_id','recipe_id','period_start'] : ['user_id'];
           rows=[...rows.filter(r=>!keys.every(k=>r[k]===v[k])), structuredClone(v)];
         });
         state.rows[table]=rows;
-      } else if(op==='insert') {state.rows[table]=[...rows,...structuredClone(values)];}
+      } else if(op==='insert') {
+        if(values.some(v=>rows.some(r=>r.id===v.id))) return {data:null,error:{code:'23505'}};
+        state.rows[table]=[...rows,...structuredClone(values)];
+      }
       else if(op==='update') {state.rows[table]=rows.map(r=>matches(r)?{...r,...values[0]}:r);}
       else if(op==='delete') {state.rows[table]=rows.filter(r=>!matches(r));}
       if (state.loseAckTable===table && op!=='select') { state.loseAckTable=null; state.online=false; return {data:null,error:new Error('InjectedLostAcknowledgement')}; }
@@ -51,10 +57,17 @@ function query(table: string) {
   return builder;
 }
 vi.mock('@/lib/supabase', () => ({ isDemoMode:false, isSupabaseConfigured:true, supabase: {
+  auth: { getSession: async () => ({ data: { session: { user: { id: 'fault-test-account-a' }, access_token: 'fault-fixture-token' } }, error: null }) },
   from:(table:string)=>query(table),
-  rpc:async (name:string,args:any) => {
-    state.calls.push({rpc:name,args,online:state.online});
-    return {data:null,error:new Error('InjectedOffline')};
+  rpc:(name:string,args:any) => {
+    const request:any = {
+      setHeader: () => request,
+      then: (resolve:any,reject:any) => Promise.resolve().then(() => {
+        state.calls.push({rpc:name,args,online:state.online});
+        return {data:null,error:new Error('InjectedOffline')};
+      }).then(resolve,reject),
+    };
+    return request;
   },
 } }));
 import * as sales from '@/lib/operations-storage';
@@ -83,7 +96,7 @@ beforeEach(()=>{state.storage.clear();state.rows={};state.online=false;state.cal
 
 it('SF01: sales queue-write rejection followed by unchanged retry must preserve changed sales',async()=>{
   state.online=true;
-  state.rows.menu_sales=[{user_id:uid,recipe_id:'dish',period_start:period,portions:10}];
+  state.rows.menu_sales=[{user_id:uid,recipe_id:'dish',period_start:period,portions:10,source:'manual',source_reference:null,updated_at:'2026-11-05T11:00:00.123456Z'}];
   await sales.loadSales(uid,period);
   state.rejectWrite=(key)=>key.includes('sales_pending');
   await expect(sales.saveSales(uid,{dish:20},period)).rejects.toThrow('InjectedQuotaExceeded');
@@ -179,7 +192,7 @@ it('SF12: concurrent local inventory snapshots preserve both',async()=>{
 });
 
 it('sales keeps durable intent if cache write fails after pending queue is saved',async()=>{
-  state.online=true;state.rows.menu_sales=[{user_id:uid,recipe_id:'dish',period_start:period,portions:10}];
+  state.online=true;state.rows.menu_sales=[{user_id:uid,recipe_id:'dish',period_start:period,portions:10,source:'manual',source_reference:null,updated_at:'2026-11-05T11:00:00.123456Z'}];
   await sales.loadSales(uid,period);
   state.rejectWrite=key=>key.includes('.sales.') && !key.includes('sales_pending');
   await expect(sales.saveSales(uid,{dish:20},period)).rejects.toThrow('InjectedQuotaExceeded');
@@ -187,10 +200,14 @@ it('sales keeps durable intent if cache write fails after pending queue is saved
   expect(await sales.loadSales(uid,period)).toEqual({dish:20});
   expect(state.rows.menu_sales[0].portions).toBe(20);
 });
-it('management retries lost acknowledgements without duplicating sales or labor',async()=>{
+it('management still retries a pre-upgrade pending daily snapshot without duplicating sales or labor',async()=>{
   state.online=true; state.loseAckTable='labor_entries';
   const draft={...inv('11111111-1111-4111-8111-111111111111'),sales:[{recipeId:'dish',name:'Dish',quantity:2,revenue:20,theoreticalUnitCost:2}],labor:[{employeeName:'QA',role:'Chef',hours:8,hourlyCost:10}]};
-  await management.saveManagementSnapshot(uid,draft);
+  state.storage.set(`manager247.management.v1.${uid}`, JSON.stringify([{
+    ...draft, kind:'daily', syncFormat:2, syncState:'pending', updatedAt:'2026-10-19',
+    laborIds:['22222222-2222-4222-8222-222222222222'],
+  }]));
+  expect((await management.loadManagementSnapshots(uid))[0].syncState).toBe('pending');
   state.online=true;
   const loaded=await management.loadManagementSnapshots(uid);
   expect(loaded[0].syncState).toBe('synced');

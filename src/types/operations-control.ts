@@ -18,9 +18,10 @@ export type StockPolicy = {
   storageZone: string;
   updatedAt: string;
   syncState: OperationsSyncState;
+  baseServerUpdatedAt?: string | null;
 };
 
-export type StockPolicyDraft = Omit<StockPolicy, 'id' | 'updatedAt' | 'syncState'> & { id?: string };
+export type StockPolicyDraft = Omit<StockPolicy, 'id' | 'updatedAt' | 'syncState' | 'baseServerUpdatedAt'> & { id?: string };
 
 export type StockObservation = {
   catalogId: string;
@@ -58,9 +59,10 @@ export type SupplierOrder = {
   createdAt: string;
   updatedAt: string;
   syncState: OperationsSyncState;
+  baseServerUpdatedAt?: string | null;
 };
 
-export type SupplierOrderDraft = Omit<SupplierOrder, 'id' | 'createdAt' | 'updatedAt' | 'syncState'> & { id?: string };
+export type SupplierOrderDraft = Omit<SupplierOrder, 'id' | 'createdAt' | 'updatedAt' | 'syncState' | 'baseServerUpdatedAt'> & { id?: string };
 
 export type WasteReason = 'expired' | 'preparation' | 'overproduction' | 'quality' | 'plate' | 'other';
 
@@ -79,9 +81,10 @@ export type WasteEntry = {
   createdAt: string;
   updatedAt: string;
   syncState: OperationsSyncState;
+  baseServerUpdatedAt?: string | null;
 };
 
-export type WasteEntryDraft = Omit<WasteEntry, 'id' | 'value' | 'createdAt' | 'updatedAt' | 'syncState'> & { id?: string };
+export type WasteEntryDraft = Omit<WasteEntry, 'id' | 'value' | 'createdAt' | 'updatedAt' | 'syncState' | 'baseServerUpdatedAt'> & { id?: string };
 
 export type InventoryFrequency = 'weekly' | 'monthly';
 
@@ -95,6 +98,7 @@ export type InventorySchedule = {
   nextDueDate: string;
   updatedAt: string;
   syncState: OperationsSyncState;
+  baseServerUpdatedAt?: string | null;
 };
 
-export type InventoryScheduleDraft = Omit<InventorySchedule, 'id' | 'updatedAt' | 'syncState'> & { id?: string };
+export type InventoryScheduleDraft = Omit<InventorySchedule, 'id' | 'updatedAt' | 'syncState' | 'baseServerUpdatedAt'> & { id?: string };
