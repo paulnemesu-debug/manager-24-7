@@ -54,11 +54,48 @@ INITIAL_LABELS = EMAIL + HAVE_CODE + SEND_CODE + ONBOARDING + HOME + (
 )
 FAILURE_LABELS = (HOME + RECIPES + PRODUCTION + ACCOUNT + MY_ACCOUNT + EDIT_LOCATION
                   + ONBOARDING + LOCATION_SETUP + CREATE_LOCATION
+                  + EQUIPMENT_REGISTRY + EQUIPMENT_FOLDER + ADD_EQUIPMENT + SAVE_EQUIPMENT + EQUIPMENT_SHEET
                   + HAVE_CODE + SEND_CODE + VERIFY + (
                       "Nu am putut verifica locația", "Could not verify your location",
                       "Costuri clare. Profit controlat.", "Clear costs. Controlled profit.",
                       "Reîncearcă", "Retry", "Deconectare", "Sign out", "Loading", "Se încarcă",
+                      "Fișă utilaj", "Equipment sheet", "Reîncarcă / sincronizează", "Reload / sync",
                   ))
+SAFE_EQUIPMENT_TEXT = set(EQUIPMENT_REGISTRY + EQUIPMENT_FOLDER + ADD_EQUIPMENT + EQUIPMENT_SHEET + (
+    "Înapoi", "Back", "Fișă utilaj", "Equipment sheet", "Reîncarcă / sincronizează", "Reload / sync",
+    "Frigider carne • HACCP", "Frigider lactate • HACCP", "Linie caldă • HACCP",
+))
+
+
+def qa_fixture_marker(value):
+    value = value.strip()
+    return value if re.fullmatch(r"QA (?:Oven|Recipe) \d+-\d+", value) else None
+
+
+def equipment_failure_screenshot_allowed(nodes, phase, focused_activity):
+    if focused_activity != f"{PACKAGE}/.MainActivity" or not re.fullmatch(r"verify-apk\d+(?:-offline|-online)?", phase):
+        return False
+    markers = [qa_fixture_marker(node.get("text", "")) for node in nodes
+               if node.get("class") != "android.widget.EditText"]
+    equipment_screen = Device.labels(nodes, EQUIPMENT_REGISTRY + EQUIPMENT_FOLDER) or (
+        any(markers) and Device.labels(nodes, EQUIPMENT_SHEET))
+    if not equipment_screen:
+        return False
+    for node in nodes:
+        for value in (node.get("text", "").strip(), node.get("content-desc", "").strip()):
+            if not value:
+                continue
+            if node.get("class") == "android.widget.EditText":
+                return False
+            if value in SAFE_EQUIPMENT_TEXT or qa_fixture_marker(value):
+                continue
+            if re.fullmatch(r"(?:Available|Out of service|Disponibil|Indisponibil) • (?:Synced|Saved on device|Pending sync|Sincronizat|Salvat pe dispozitiv)", value):
+                continue
+            if re.fullmatch(r"(?:Export|Exportă) (?:XLSX|CSV|PDF)(?: sheet| fișă)?", value):
+                continue
+            # An unknown label, record name, credential or URL makes image capture unsafe.
+            return False
+    return True
 
 
 class QAError(Exception):
@@ -476,6 +513,7 @@ class Device:
             if cls == "android.widget.EditText":
                 continue
             label = next((value for value in FAILURE_LABELS if label_matches(node, (value,))), None)
+            label = label or qa_fixture_marker(node.get("text", ""))
             if label:
                 safe_nodes.append({"label": label, "class": cls if re.fullmatch(
                     r"android\.[\w.$]+", cls) else "other", "bounds": bounds(node)})
@@ -501,6 +539,16 @@ class Device:
             "visibleNavigation": safe_nodes,
             "screenshotCaptured": False,
         }
+        try:
+            diagnostic["connectivityAtCapture"] = self.connectivity_state()
+        except QAError:
+            diagnostic["connectivityAtCapture"] = "unavailable"
+        if equipment_failure_screenshot_allowed(nodes, self.phase, diagnostic["focusedAppActivity"]):
+            try:
+                self.save_screenshot("failure-equipment")
+                diagnostic["screenshotCaptured"] = True
+            except QAError:
+                pass
         (self.evidence / "failure-diagnostics.json").write_text(
             json.dumps(diagnostic, indent=2) + "\n", encoding="utf-8",
         )
@@ -688,7 +736,7 @@ def assert_recipe(device, title, ingredients, phase, record=False):
 
 def assert_equipment(device, name, brand, phase):
     equipment_registry(device)
-    device.find((name,), scroll="down")
+    device.find((name,), scroll="both")
 
     def sheet(nodes):
         names = device.labels(nodes, (name,))
@@ -804,6 +852,13 @@ def run(device, apk_dir, verified, result, offline_upgrade=False):
         if original_network is not None:
             active_failure = sys.exc_info()[0] is not None
             failed_phase = device.phase
+            if active_failure:
+                try:
+                    device.failure_diagnostics()
+                    result["failureDiagnosticsCaptured"] = True
+                    result["failureEvidenceBeforeConnectivityRestore"] = True
+                except Exception:
+                    result["failureDiagnosticsCaptured"] = False
             try:
                 device.phase = "restore-network"
                 restored = device.restore_connectivity(original_network)
@@ -867,7 +922,7 @@ def main():
     except Exception as error:
         result["failure"] = f"Unexpected harness error ({type(error).__name__})"
     finally:
-        if result["status"] == "failed" and device is not None:
+        if result["status"] == "failed" and device is not None and not result.get("failureDiagnosticsCaptured"):
             try:
                 device.failure_diagnostics()
                 result["failureDiagnosticsCaptured"] = True
