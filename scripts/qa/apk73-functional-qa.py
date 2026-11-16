@@ -1,6 +1,7 @@
 """Exercise fresh Instant Demo on the offline APK73 emulator after upgrade QA."""
 
 import argparse
+from collections.abc import Callable
 from contextlib import closing
 from datetime import date, datetime
 import importlib.util
@@ -9,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import subprocess
 import tempfile
 import time
 from xml.etree import ElementTree as XML
@@ -38,6 +40,10 @@ EMPTY_INPUT = {"", "Introdu temperatura", "Enter temperature"}
 DECIMALS = {"2,3", "2.3"}
 TOTAL = re.compile(r"8(?:[.,]0)?\s+(?:ore|hours)")
 PROGRESS = ("0/3 · 0 °C – 4 °C", "1/3 · 0 °C – 4 °C")
+SCREENSHOT_NAMES = ("01-demo-home.png", "02-thermogram-1-of-3.png", "03-saved-attendance.png")
+PNG_HEADER = b"\x89PNG\r\n\x1a\n"
+PNG_END = bytes.fromhex("0000000049454e44ae426082")
+MAX_SCREENSHOT_BYTES = 16 * 1024 * 1024
 SAFE_UI = set().union(
     native.DEMO_LABELS, native.HOME_LABELS, {FRIDGE}, OTHER_EQUIPMENT, MEASURED, RECORD,
     TEMPERATURE_LOG, HR, DAILY, EMPLOYEE, DANA, TODAY, PRESENT, USE_SCHEDULE, CONFIRM, BACK,
@@ -111,6 +117,27 @@ def fridge_target(tree, names, progress, *, entered=None, focused=False):
     return None
 
 
+def demo_home_visible(tree):
+    return control(tree, native.HOME_LABELS) is not None and (
+        control(tree, TEMPERATURE_LOG) is not None or control(tree, HR) is not None
+    )
+
+
+def completed_reading(tree):
+    return fridge_target(tree, {PROGRESS[1]}, 1)
+
+
+def saved_attendance(tree):
+    return unique(node for node in app_nodes(tree) if any(TOTAL.fullmatch(label) for label in labels(node)))
+
+
+SCREENSHOT_CHECKS = {
+    SCREENSHOT_NAMES[0]: demo_home_visible,
+    SCREENSHOT_NAMES[1]: lambda tree: completed_reading(tree) is not None,
+    SCREENSHOT_NAMES[2]: lambda tree: saved_attendance(tree) is not None,
+}
+
+
 def save_ui(tree, path):
     snapshot = XML.Element("synthetic-ui")
 
@@ -137,7 +164,52 @@ def save_ui(tree, path):
     XML.ElementTree(snapshot).write(path, encoding="utf-8", xml_declaration=True)
 
 
+def valid_png(data):
+    return 45 <= len(data) <= MAX_SCREENSHOT_BYTES and data.startswith(PNG_HEADER) and data.endswith(PNG_END)
+
+
+def uploadable_screenshots(directory):
+    if directory.is_symlink() or not directory.is_dir():
+        return []
+    selected = []
+    for name in SCREENSHOT_NAMES:
+        path = directory / name
+        if path.is_symlink() or not path.is_file():
+            continue
+        with path.open("rb") as image:
+            if valid_png(image.read(MAX_SCREENSHOT_BYTES + 1)):
+                selected.append(path.resolve())
+    return selected
+
+
 class DemoGuest(native.Emulator):
+    def focused_app(self):
+        window = self.run("Check foreground window", "shell", "dumpsys", "window", "windows", timeout=8)
+        focus = re.search(r"^\s*mCurrentFocus=Window\{[^\n}]*\bu0\s+([^\s}]+)", window, re.M)
+        return bool(focus and focus[1] in {native.ACTIVITY, f"{native.PACKAGE}/{native.PACKAGE}.MainActivity"})
+
+    def screen_png(self):
+        try:
+            result = subprocess.run(
+                [self.adb, "-s", self.serial, "exec-out", "screencap", "-p"],
+                capture_output=True, timeout=12, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            raise native.CheckError("Guest screenshot command failed") from None
+        require(result.returncode == 0 and valid_png(result.stdout), "Guest did not return a complete PNG")
+        return result.stdout
+
+    def capture(self, name, directory, screen_is_visible: Callable[[XML.Element], bool]):
+        require(name in SCREENSHOT_NAMES, "Unexpected visual evidence filename")
+        self.offline()
+        tree = self.tree()
+        require(tree is not None and screen_is_visible(tree) is True, "Expected synthetic screen is no longer visible")
+        require(self.focused_app(), "Manager 24/7 is not the foreground window")
+        png = self.screen_png()
+        require(self.focused_app(), "Manager 24/7 lost foreground focus during screenshot")
+        with (directory / name).open("xb") as image:
+            image.write(png)
+
     def tree(self):
         path = f"/data/local/tmp/manager247-functional-{os.getpid()}.xml"
         self.run("Clear previous observation", "shell", "rm", "-f", path)
@@ -281,6 +353,16 @@ def run_probes(args, report):
     observe = lambda name, selector, **options: guest.observe(name, args.evidence, selector, **options)
     click = lambda name, names, **options: observe(name, lambda tree: control(tree, names, clickable=True),
                                                   tap=True, **options)
+
+    def capture(name):
+        visual = report["visualEvidence"]
+        try:
+            guest.capture(name, args.evidence, SCREENSHOT_CHECKS[name])
+        except (native.CheckError, OSError) as error:
+            visual["unverified"][name] = str(error) if isinstance(error, native.CheckError) else type(error).__name__
+        else:
+            visual["captured"].append(name)
+
     report["stage"] = "freshDemoAfterUpgrade"
     guest.stop()
     guest.launch()
@@ -293,6 +375,7 @@ def run_probes(args, report):
             "Fresh demo did not seed the expected HR shift")
     require(json.loads(guest.demo_value(HACCP_KEY) or "[]") == [], "Fresh demo already contains HACCP records")
     report["freshDemoReseeded"] = True
+    capture(SCREENSHOT_NAMES[0])
 
     report["stage"] = "refrigeratorReading"
     click("open-temperature-log", TEMPERATURE_LOG, scroll=True)
@@ -304,9 +387,10 @@ def run_probes(args, report):
     guest.keyboard_back()
     observe("exact-decimal-before-save", lambda tree: fridge_target(tree, MEASURED, 0, entered=DECIMALS))
     observe("record-reading", lambda tree: fridge_target(tree, RECORD, 0), scroll=True, tap=True)
-    observe("one-of-three-readings", lambda tree: fridge_target(tree, {PROGRESS[1]}, 1))
+    observe("one-of-three-readings", completed_reading)
     reading = reading_evidence(json.loads(guest.demo_value(HACCP_KEY) or "[]"), today)
     report["haccp"] = dict(reading, beforeProgress="0/3", afterProgress="1/3")
+    capture(SCREENSHOT_NAMES[1])
 
     report["stage"] = "attendanceConfirmation"
     click("back-to-home", BACK)
@@ -321,29 +405,36 @@ def run_probes(args, report):
     require(after_prefill == before, "Using the schedule wrote data before explicit confirmation")
     report["schedulePrefillLeftStorageUnchanged"] = True
     click("confirm-attendance", CONFIRM, scroll=True)
-    observe("eight-hour-total", lambda tree: unique(node for node in app_nodes(tree)
-            if any(TOTAL.fullmatch(label) for label in labels(node))), scroll=True)
+    observe("eight-hour-total", saved_attendance, scroll=True)
     confirmed = guest.demo_value(native.DEMO_HR_KEY)
     require(confirmed and attendance_evidence(json.loads(confirmed), today, confirmed=True) == 480,
             "Confirmed attendance did not persist exactly eight hours")
     report["hr"] = {"actualStart": "10:00", "actualEnd": "18:00", "workedMinutes": 480}
+    capture(SCREENSHOT_NAMES[2])
     guest.offline()
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--adb", default="adb")
-    parser.add_argument("--serial", required=True)
-    parser.add_argument("--upgrade-report", type=Path, required=True)
-    parser.add_argument("--apk73-sha256", required=True)
-    parser.add_argument("--evidence", type=Path, required=True, help="New local evidence directory")
+    parser.add_argument("--serial")
+    parser.add_argument("--upgrade-report", type=Path)
+    parser.add_argument("--apk73-sha256")
+    parser.add_argument("--evidence", type=Path, help="New local evidence directory")
     parser.add_argument("--execute", action="store_true", help="Confirm reset and writes to synthetic guest demo")
+    parser.add_argument("--list-screenshots", type=Path, help="Print only existing approved PNG paths for upload")
     args = parser.parse_args()
-    if not args.execute or not re.fullmatch(r"[a-f0-9]{64}", args.apk73_sha256):
-        parser.error("Provide --execute and the verified APK73 SHA-256")
+    if args.list_screenshots:
+        for path in uploadable_screenshots(args.list_screenshots):
+            print(path)
+        return 0
+    if not (args.execute and args.serial and args.upgrade_report and args.evidence
+            and re.fullmatch(r"[a-f0-9]{64}", args.apk73_sha256 or "")):
+        parser.error("Provide --execute, emulator serial, upgrade report, APK73 SHA-256 and evidence directory")
     args.evidence.mkdir(parents=True, exist_ok=False)
     report = {"status": "INCOMPLETE", "scope": "offline-synthetic-demo-only",
-              "stage": "preflight", "authenticatedContinuity": "NOT_RUN"}
+              "stage": "preflight", "authenticatedContinuity": "NOT_RUN",
+              "visualEvidence": {"captured": [], "unverified": {}}}
     try:
         run_probes(args, report)
         report.update(status="PASS", stage="complete")

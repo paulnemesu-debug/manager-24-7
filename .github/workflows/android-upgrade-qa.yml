@@ -104,6 +104,7 @@ jobs:
             --aapt "$build_tools/aapt" --apksigner "$build_tools/apksigner"
 
       - name: Boot and test the original APKs offline
+        id: offline_smoke
         shell: bash
         env:
           PROBE_DEMO_CACHE: ${{ inputs.probe_demo_cache }}
@@ -179,6 +180,26 @@ jobs:
               >> "$GITHUB_STEP_SUMMARY"
           fi
           exit "$result"
+
+      - name: Select completed synthetic demo screenshots
+        id: visual_evidence
+        if: ${{ !cancelled() && inputs.run_functional_demo && (steps.offline_smoke.outcome == 'success' || steps.offline_smoke.outcome == 'failure') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          images="$(python3 scripts/qa/apk73-functional-qa.py --list-screenshots "$RUNNER_TEMP/apk73-functional-evidence")"
+          if [[ -n "$images" ]]; then
+            printf 'paths<<APK73_PNG_PATHS\n%s\nAPK73_PNG_PATHS\n' "$images" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload approved synthetic demo screenshots
+        if: ${{ !cancelled() && steps.visual_evidence.outputs.paths != '' }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: apk73-offline-demo-screenshots
+          path: ${{ steps.visual_evidence.outputs.paths }}
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Remove temporary APK inputs, AVD and demo evidence
         if: always()
