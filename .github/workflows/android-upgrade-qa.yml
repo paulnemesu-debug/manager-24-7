@@ -1,363 +1,201 @@
-name: Android staging upgrade QA
+name: Android APK 72 to 73 offline QA
 
 on:
   workflow_dispatch:
     inputs:
-      artifact_set:
-        description: Select the original ARM64 APKs or historical source builds compiled for the emulator
-        type: choice
-        options:
-          - arm64-original
-          - x86_64-source-matched
-        default: arm64-original
-      diagnostics_only:
-        description: Install APK 68 and collect initial Android UI diagnostics without signing in
-        type: boolean
-        required: false
-        default: false
-      offline_upgrade:
-        description: Verify cached data through offline cold starts and upgrades, then check the final version online
-        type: boolean
-        required: false
-        default: false
-      native_smoke:
-        description: After offline acceptance, test native PDF save/reopen and synthetic gallery/camera
-        type: boolean
-        required: false
-        default: false
-      foodcom_smoke:
-        description: After candidate70 acceptance, install the public Food.com catalogue and reopen a recipe offline
-        type: boolean
-        required: false
-        default: false
-      apk70_sha256:
-        description: Optional verified SHA-256 of the finished staging APK 70
+      expected_head:
+        description: SHA of the reviewed QA branch commit that contains this workflow
         type: string
-        required: false
-        default: ''
+        required: true
+      apk73_sha256:
+        description: SHA-256 of the exact signed ARM64 APK 73
+        type: string
+        required: true
+      probe_demo_cache:
+        description: Compare the known synthetic APK 72 HR cache before and after the upgrade
+        type: boolean
+        default: true
+      run_functional_demo:
+        description: Exercise the fresh offline HACCP and HR demo after successful upgrade and cache verification
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: android-staging-upgrade-qa
+  group: apk73-offline-native-qa
   cancel-in-progress: false
 
 jobs:
   upgrade:
     runs-on: ubuntu-24.04
-    timeout-minutes: ${{ inputs.foodcom_smoke && 55 || 35 }}
+    timeout-minutes: 28
     env:
       ANDROID_SERIAL: emulator-5554
-      QA_DIAGNOSTICS_ONLY: ${{ inputs.diagnostics_only }}
-      QA_ARTIFACT_SET: ${{ inputs.artifact_set || 'arm64-original' }}
-      QA_OFFLINE_UPGRADE: ${{ inputs.offline_upgrade }}
-      QA_NATIVE_SMOKE: ${{ inputs.native_smoke }}
-      QA_FOODCOM_SMOKE: ${{ inputs.foodcom_smoke }}
-      APK70_SHA256: ${{ inputs.apk70_sha256 }}
-
+      APK73_SHA256: ${{ inputs.apk73_sha256 }}
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-
-      - name: Check runner and download exact staging builds
+      - name: Check the requested branch and commit
         shell: bash
         env:
-          APK68_URL: ${{ secrets.QA_APK68_URL }}
-          APK69_URL: ${{ secrets.QA_APK69_URL }}
-          APK70_URL: ${{ secrets.QA_APK70_URL }}
-          X86_APK68_URL: ${{ secrets.QA_X86_APK68_URL }}
-          X86_APK69_URL: ${{ secrets.QA_X86_APK69_URL }}
-          X86_APK70_URL: ${{ secrets.QA_X86_APK70_URL }}
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
         run: |
           set -euo pipefail
-          case "$QA_ARTIFACT_SET" in
-            arm64-original) ;;
-            x86_64-source-matched)
-              APK68_URL="$X86_APK68_URL"
-              APK69_URL="$X86_APK69_URL"
-              APK70_URL="$X86_APK70_URL"
-              ;;
-            *) echo 'Unknown APK artifact set.' >&2; exit 1 ;;
-          esac
-          export ANDROID_AVD_HOME="$RUNNER_TEMP/android-qa-avd"
-          export QA_APK_DIR="$RUNNER_TEMP/android-qa-apks"
-          export QA_EVIDENCE="$RUNNER_TEMP/android-qa-evidence"
-          printf '%s\n' "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" "QA_APK_DIR=$QA_APK_DIR" \
-            "QA_EVIDENCE=$QA_EVIDENCE" >> "$GITHUB_ENV"
-          if [[ ! -c /dev/kvm ]]; then
-            echo 'This runner does not expose /dev/kvm.' >&2
-            exit 1
-          fi
+          [[ "$GITHUB_REF" == refs/heads/qa/apk73-native ]]
+          [[ "$EXPECTED_HEAD" =~ ^[a-fA-F0-9]{40}$ && "$GITHUB_SHA" == "${EXPECTED_HEAD,,}" ]]
+          [[ "$APK73_SHA256" =~ ^[a-fA-F0-9]{64}$ ]]
+
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Prepare the pinned Android system image and KVM
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -c /dev/kvm ]]
           if [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then
             sudo setfacl -m "u:$(id -un):rw" /dev/kvm
           fi
-          if [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then
-            echo 'The runner user cannot access /dev/kvm.' >&2
-            exit 1
-          fi
-          if [[ -n "$APK70_SHA256" && ! "$APK70_SHA256" =~ ^[A-Fa-f0-9]{64}$ ]]; then
-            echo 'The optional APK 70 SHA-256 must contain 64 hexadecimal characters.' >&2
-            exit 1
-          fi
-          if [[ "$QA_DIAGNOSTICS_ONLY" == true && -n "$APK70_SHA256" ]]; then
-            echo 'APK 70 is only accepted in upgrade mode.' >&2
-            exit 1
-          fi
-          if [[ "$QA_DIAGNOSTICS_ONLY" == true && "$QA_OFFLINE_UPGRADE" == true ]]; then
-            echo 'Offline upgrades require the authenticated QA mode.' >&2
-            exit 1
-          fi
-          if [[ "$QA_FOODCOM_SMOKE" == true && "$QA_NATIVE_SMOKE" != true ]]; then
-            echo 'Food.com smoke requires native smoke and its mandatory candidate70 acceptance.' >&2
-            exit 1
-          fi
-          if [[ "$QA_NATIVE_SMOKE" == true ]] &&
-             [[ "$QA_OFFLINE_UPGRADE" != true || "$QA_DIAGNOSTICS_ONLY" == true ||
-                "$QA_ARTIFACT_SET" != x86_64-source-matched || -z "$APK70_SHA256" ]]; then
-            echo 'Native smoke requires the authenticated offline x86_64 APK 70 chain.' >&2
-            exit 1
-          fi
-          mkdir -p "$QA_APK_DIR" "$QA_EVIDENCE"
-          download_apk() {
-            local version="$1" url="$2"
-            if [[ "$url" != https://* ]]; then
-              echo "A protected HTTPS artifact URL is required for APK $version." >&2
-              return 1
-            fi
-            if ! curl --silent --fail --location --proto '=https' --proto-redir '=https' \
-                --connect-timeout 20 --max-time 120 --retry 2 \
-                --output "$QA_APK_DIR/apk$version.apk" -- "$url" 2>/dev/null; then
-              echo "APK $version could not be downloaded." >&2
-              return 1
-            fi
-          }
-          download_apk 68 "$APK68_URL"
-          if [[ "$QA_DIAGNOSTICS_ONLY" != true ]]; then
-            download_apk 69 "$APK69_URL"
-            if [[ -n "$APK70_SHA256" ]]; then
-              download_apk 70 "$APK70_URL"
-            fi
-          fi
-
-      - name: Prepare pinned Android emulator and verify the APKs
-        shell: bash
-        run: |
-          set -euo pipefail
-          sdkmanager_path="$(command -v sdkmanager || true)"
-          if [[ -z "$sdkmanager_path" ]]; then
-            sdkmanager_path="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          fi
+          [[ -r /dev/kvm && -w /dev/kvm ]]
+          avd_home="$RUNNER_TEMP/apk73-android-avd"
           build_tools="$ANDROID_HOME/build-tools/36.0.0"
-          system_image="$ANDROID_HOME/system-images/android-30/google_apis/x86_64"
-          if [[ ! -f "$system_image/system.img" || ! -x "$build_tools/apksigner" ]]; then
-            if ! "$sdkmanager_path" 'system-images;android-30;google_apis;x86_64' \
-                'build-tools;36.0.0' </dev/null; then
-              echo 'SDK package installation failed. Check the runner Android SDK and existing license acceptance.' >&2
-              exit 1
-            fi
+          image="$ANDROID_HOME/system-images/android-30/google_apis/x86_64"
+          sdkmanager="$(command -v sdkmanager || true)"
+          if [[ -z "$sdkmanager" ]]; then sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"; fi
+          if [[ ! -f "$image/system.img" || ! -x "$build_tools/apksigner" ]]; then
+            "$sdkmanager" 'system-images;android-30;google_apis;x86_64' 'build-tools;36.0.0' </dev/null
           fi
-          if [[ ! -f "$system_image/system.img" || ! -x "$build_tools/apksigner" ]] ||
-             ! grep -Eq '^Pkg\.Revision=16[[:space:]]*$' "$system_image/source.properties"; then
-            echo 'Android 11 Google APIs x86_64 system image revision 16 and build-tools 36.0.0 are required.' >&2
-            exit 1
-          fi
-
-          mode=()
-          if [[ "$QA_DIAGNOSTICS_ONLY" == true ]]; then
-            mode+=(--diagnostics-only)
-          fi
-          python3 scripts/qa/android-native-upgrade-verify.py "${mode[@]}" \
-            --apk-dir "$QA_APK_DIR" --aapt "$build_tools/aapt" --apksigner "$build_tools/apksigner" \
-            --artifact-set "$QA_ARTIFACT_SET" \
-            --apk70-sha256 "$APK70_SHA256" --output "$QA_EVIDENCE/verified-apks.json"
-          if [[ "$QA_NATIVE_SMOKE" == true ]]; then
-            python3 -c 'import ast, pathlib; [ast.parse(pathlib.Path(p).read_text()) for p in ("scripts/qa/native70-smoke/supplemental-native70.py", "scripts/qa/native70-smoke/receiver/build.py")]'
-          fi
-
-          archive="$RUNNER_TEMP/android-emulator-37.1.11.zip"
+          [[ -f "$image/system.img" && -x "$build_tools/aapt" && -x "$build_tools/apksigner" ]]
+          grep -Eq '^Pkg\.Revision=16[[:space:]]*$' "$image/source.properties"
+          archive="$RUNNER_TEMP/emulator-37.1.11.zip"
           curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
-            --retry 2 --connect-timeout 20 --max-time 240 --output "$archive" \
+            --retry 2 --connect-timeout 20 --max-time 240 -o "$archive" \
             https://dl.google.com/android/repository/emulator-linux_x64-15917651.zip
-          printf '%s  %s\n' '95771e0ae431897b2a4bd2d97fa095f29a8b0624a7b216baf529f9306161c266' "$archive" |
-            sha256sum --check
-          mkdir -p "$RUNNER_TEMP/android-qa-emulator" "$ANDROID_AVD_HOME"
-          unzip -q "$archive" -d "$RUNNER_TEMP/android-qa-emulator"
-          emulator="$RUNNER_TEMP/android-qa-emulator/emulator/emulator"
-          "$emulator" -accel-check | tee "$QA_EVIDENCE/acceleration.txt"
-          grep -Eq 'KVM.*(installed|usable)' "$QA_EVIDENCE/acceleration.txt"
-          printf 'no\n' | "$(dirname "$sdkmanager_path")/avdmanager" create avd \
-            --name manager247_qa --package 'system-images;android-30;google_apis;x86_64' --device pixel_3a
+          printf '%s  %s\n' '95771e0ae431897b2a4bd2d97fa095f29a8b0624a7b216baf529f9306161c266' "$archive" | sha256sum --check
+          mkdir -p "$avd_home" "$RUNNER_TEMP/apk73-emulator"
+          unzip -q "$archive" -d "$RUNNER_TEMP/apk73-emulator"
+          emulator="$RUNNER_TEMP/apk73-emulator/emulator/emulator"
+          "$emulator" -accel-check | grep -Eq 'KVM.*(installed|usable)'
+          export ANDROID_AVD_HOME="$avd_home"
+          printf 'no\n' | "$(dirname "$sdkmanager")/avdmanager" create avd \
+            --name manager247_apk73 --package 'system-images;android-30;google_apis;x86_64' --device pixel_3a
+          printf 'ANDROID_AVD_HOME=%s\nQA_APK_DIR=%s\nQA_EMULATOR=%s\n' \
+            "$avd_home" "$RUNNER_TEMP/apk73-inputs" "$emulator" >> "$GITHUB_ENV"
 
-      - name: Boot Android and run staging QA
+      - name: Download and verify both original signed APKs
         shell: bash
         env:
-          QA_STAGING_EMAIL: ${{ !inputs.diagnostics_only && secrets.QA_STAGING_EMAIL || '' }}
-          QA_STAGING_OTP: ${{ !inputs.diagnostics_only && secrets.QA_STAGING_OTP || '' }}
+          QA_APK72_URL_1: ${{ secrets.QA_APK72_URL_1 }}
+          QA_APK72_URL_2: ${{ secrets.QA_APK72_URL_2 }}
+          QA_APK72_URL_3: ${{ secrets.QA_APK72_URL_3 }}
+          QA_APK72_URL_4: ${{ secrets.QA_APK72_URL_4 }}
+          QA_APK73_URL_1: ${{ secrets.QA_APK73_URL_1 }}
+          QA_APK73_URL_2: ${{ secrets.QA_APK73_URL_2 }}
+          QA_APK73_URL_3: ${{ secrets.QA_APK73_URL_3 }}
+          QA_APK73_URL_4: ${{ secrets.QA_APK73_URL_4 }}
         run: |
           set -euo pipefail
-          mode=()
-          if [[ "$QA_DIAGNOSTICS_ONLY" == true ]]; then
-            mode+=(--diagnostics-only)
-          elif [[ -z "$QA_STAGING_EMAIL" || ! "$QA_STAGING_OTP" =~ ^[0-9]{6,10}$ ]]; then
-            echo 'A synthetic staging owner email and a fresh OTP are required.' >&2
-            exit 1
-          fi
-          if [[ "$QA_OFFLINE_UPGRADE" == true ]]; then
-            mode+=(--offline-upgrade)
-          fi
-          emulator="$RUNNER_TEMP/android-qa-emulator/emulator/emulator"
+          umask 077
+          build_tools="$ANDROID_HOME/build-tools/36.0.0"
+          python3 scripts/qa/apk73-native-upgrade.py prepare \
+            --apk-dir "$QA_APK_DIR" --report "$RUNNER_TEMP/apk73-provenance.json" \
+            --aapt "$build_tools/aapt" --apksigner "$build_tools/apksigner"
+
+      - name: Boot and test the original APKs offline
+        shell: bash
+        env:
+          PROBE_DEMO_CACHE: ${{ inputs.probe_demo_cache }}
+          RUN_FUNCTIONAL_DEMO: ${{ inputs.run_functional_demo }}
+        run: |
+          set -euo pipefail
           adb="$ANDROID_HOME/platform-tools/adb"
-          back_camera=none
-          if [[ "$QA_NATIVE_SMOKE" == true ]]; then
-            back_camera=emulated
-          fi
-          "$emulator" -avd manager247_qa -port 5554 -accel on -gpu swiftshader \
-            -no-window -no-snapshot -no-boot-anim -no-audio -camera-back "$back_camera" -camera-front none \
-            >"$RUNNER_TEMP/android-qa-emulator.log" 2>&1 &
-          emulator_pid=$!
-          trap 'timeout 10 "$adb" -s "$ANDROID_SERIAL" emu kill >/dev/null 2>&1 || true; kill "$emulator_pid" 2>/dev/null || true' EXIT
-          booted=false
-          for ((attempt=0; attempt<90; attempt++)); do
-            if ! kill -0 "$emulator_pid" 2>/dev/null; then
-              break
+          build_tools="$ANDROID_HOME/build-tools/36.0.0"
+          report="$RUNNER_TEMP/apk73-native-report.json"
+          emulator_pid=
+          # Bash invokes this through the EXIT trap.
+          # shellcheck disable=SC2329
+          cleanup() {
+            if [[ -n "$emulator_pid" ]]; then
+              timeout 10 "$adb" -s "$ANDROID_SERIAL" emu kill >/dev/null 2>&1 || true
+              kill "$emulator_pid" 2>/dev/null || true
             fi
-            if [[ "$(timeout 3 "$adb" -s "$ANDROID_SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)" == 1 ]]; then
-              booted=true
+          }
+          trap cleanup EXIT
+          "$QA_EMULATOR" -avd manager247_apk73 -port 5554 -accel on -gpu swiftshader \
+            -no-window -no-snapshot -no-boot-anim -no-audio -camera-back none -camera-front none \
+            >"$RUNNER_TEMP/apk73-emulator.log" 2>&1 &
+          emulator_pid=$!
+          ready=false
+          for ((attempt=0; attempt<90; attempt++)); do
+            if ! kill -0 "$emulator_pid" 2>/dev/null; then break; fi
+            if [[ "$(timeout 3 "$adb" -s "$ANDROID_SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)" == 1 ]] \
+              && timeout 5 "$adb" -s "$ANDROID_SERIAL" shell service check package 2>/dev/null | grep -q 'Service package: found'; then
+              ready=true
               break
             fi
             sleep 2
           done
-          if [[ "$booted" != true ]]; then
-            echo 'The emulator did not finish booting.' >&2
+          if [[ "$ready" != true ]]; then
+            echo 'Android boot or package service did not become ready. No APK was installed.' >&2
             exit 1
           fi
-          abi_list="$("$adb" shell getprop ro.product.cpu.abilist | tr -d '\r')"
-          native_bridge="$("$adb" shell getprop ro.dalvik.vm.native.bridge | tr -d '\r')"
-          android_api="$("$adb" shell getprop ro.build.version.sdk | tr -d '\r')"
-          if [[ ",$abi_list," != *,arm64-v8a,* || -z "$native_bridge" || "$native_bridge" == 0 || "$android_api" != 30 ]]; then
-            echo 'Android did not advertise the expected API 30 ARM64 translation support.' >&2
-            exit 1
+          "$adb" -s "$ANDROID_SERIAL" shell wm dismiss-keyguard
+          args=()
+          if [[ "$PROBE_DEMO_CACHE" == true ]]; then args+=(--probe-demo-cache); fi
+          result=0
+          python3 scripts/qa/apk73-native-upgrade.py native "${args[@]}" \
+            --apk-dir "$QA_APK_DIR" --report "$report" --adb "$adb" --serial "$ANDROID_SERIAL" \
+            --aapt "$build_tools/aapt" --apksigner "$build_tools/apksigner" || result=$?
+          if [[ -s "$report" ]]; then
+            {
+              printf '### APK 72 to 73 native QA\n\n'
+              sed 's/^/    /' "$report"
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
-          printf 'api=%s\nabi=%s\nnativeBridge=%s\n' "$android_api" "$abi_list" "$native_bridge" >"$QA_EVIDENCE/emulator.txt"
-          "$adb" shell settings put global window_animation_scale 0
-          "$adb" shell settings put global transition_animation_scale 0
-          "$adb" shell settings put global animator_duration_scale 0
-          "$adb" shell wm dismiss-keyguard
-          if [[ "$QA_NATIVE_SMOKE" == true ]]; then
-            qa_jdk="${JAVA_HOME_17_X64:-}"
-            probe_root=scripts/qa/native70-smoke/cache-probe
-            if [[ -z "$qa_jdk" || ! -x "$qa_jdk/bin/javac" ||
-                  "$("$adb" shell getprop ro.kernel.qemu | tr -d '\r')" != 1 ||
-                  "$("$adb" shell getprop ro.debuggable | tr -d '\r')" != 1 ]]; then
-              echo 'The read-only cache probe requires the disposable debuggable emulator and installed JDK17.' >&2
-              exit 1
-            fi
-            python3 "$probe_root/build.py" --sdk "$ANDROID_HOME" --jdk "$qa_jdk" \
-              >"$RUNNER_TEMP/qa-cache-probe-build.log" 2>&1
-            cp "$probe_root/out/build-evidence.json" "$QA_EVIDENCE/cache-probe-build.json"
-            "$adb" root >"$RUNNER_TEMP/qa-emulator-root.log" 2>&1
-            timeout 20 "$adb" wait-for-device
-            mode+=(--continue-historical --cache-probe-dex "$probe_root/out/dex/classes.dex")
-          fi
-          python3 scripts/qa/android-native-upgrade.py "${mode[@]}" \
-            --adb "$adb" --apk-dir "$QA_APK_DIR" --evidence "$QA_EVIDENCE"
-          if [[ "$QA_NATIVE_SMOKE" == true ]]; then
-            unset QA_STAGING_EMAIL QA_STAGING_OTP
-            smoke_root=scripts/qa/native70-smoke
-            mkdir -p "$QA_EVIDENCE/native-smoke"
-            smoke_failed=0
-            # Historical failures remain a failing overall job, even when candidate70 passes.
-            if python3 -c 'import json,os,sys; sys.exit(json.load(open(os.environ["QA_EVIDENCE"]+"/upgrade-results.json"))["status"] == "historical-failures")'; then
-              :
-            else
-              smoke_failed=1
-            fi
-            qa_jdk="${JAVA_HOME_17_X64:-}"
-            if [[ -n "$qa_jdk" && -x "$qa_jdk/bin/javac" &&
-                  -f "$ANDROID_HOME/platforms/android-36/android.jar" ]] &&
-               "$qa_jdk/bin/java" -version 2>&1 | grep -q 'version "17\.'; then
-              if python3 "$smoke_root/receiver/build.py" --sdk "$ANDROID_HOME" --jdk "$qa_jdk" \
-                  >"$RUNNER_TEMP/qa-pdf-receiver-build.log" 2>&1; then
-                cp "$smoke_root/receiver/out/build-evidence.json" "$QA_EVIDENCE/native-smoke/receiver-build.json"
-                if ! "$adb" install "$smoke_root/receiver/out/qa-pdf-sink.apk" \
-                    >"$RUNNER_TEMP/qa-pdf-receiver-install.log" 2>&1; then
-                  echo 'The local PDF recipient did not install.' >&2
-                  smoke_failed=1
-                fi
+          if [[ "$RUN_FUNCTIONAL_DEMO" == true && "$result" == 0 ]]; then
+            functional_dir="$RUNNER_TEMP/apk73-functional-evidence"
+            python3 scripts/qa/apk73-functional-qa.py --execute \
+              --adb "$adb" --serial "$ANDROID_SERIAL" --upgrade-report "$report" \
+              --apk73-sha256 "${APK73_SHA256,,}" --evidence "$functional_dir" || result=$?
+            {
+              printf '\n### Fresh offline demo on APK 73\n\n'
+              if [[ -s "$functional_dir/functional-report.json" ]]; then
+                sed 's/^/    /' "$functional_dir/functional-report.json"
               else
-                echo 'The local PDF recipient build failed.' >&2
-                smoke_failed=1
+                printf 'INCOMPLETE. The helper did not produce a report.\n'
               fi
-            else
-              echo 'Native PDF smoke requires the installed JDK 17 and Android platform 36.' >&2
-              smoke_failed=1
-            fi
-            supplemental_sha=367d0e0b0af7ddc3cb49c7efbcc9f76130b4a33c82355d92f388aa6503bcfb5c
-            if ! printf '%s  %s\n' "$supplemental_sha" "$smoke_root/supplemental-native70.py" |
-                sha256sum --check --status; then
-              echo 'The reviewed supplemental native helper checksum changed.' >&2
-              exit 1
-            fi
-            for smoke_mode in pdf gallery camera; do
-              if ! python3 "$smoke_root/supplemental-native70.py" --execute --mode "$smoke_mode" \
-                  --base-harness scripts/qa/android-native-upgrade.py --base-evidence "$QA_EVIDENCE" \
-                  --evidence "$QA_EVIDENCE/native-smoke/$smoke_mode" --apk70-sha256 "$APK70_SHA256" --adb "$adb"; then
-                smoke_failed=1
-              fi
-            done
-            if [[ "$QA_FOODCOM_SMOKE" == true ]]; then
-              foodcom_dir="$QA_EVIDENCE/native-smoke/foodcom"
-              foodcom_helper="$smoke_root/native-foodcom-smoke.py"
-              foodcom_manifest="$smoke_root/public-foodcom-manifest.json"
-              helper_sha=dd9f2914233edfb317da995b27bc8a366b99852571f07085fb47ac74ea2fb66b
-              manifest_sha=961e8c3af799c01e9d8cf1baad0d69747ca5469e60998776fbc77bdb8c3b0e74
-              if printf '%s  %s\n%s  %s\n' "$helper_sha" "$foodcom_helper" "$manifest_sha" "$foodcom_manifest" |
-                 sha256sum --check --status; then
-                base_harness_sha="$(git show "${GITHUB_SHA}:scripts/qa/android-native-upgrade.py" | sha256sum | cut -d ' ' -f 1)"
-                fixture_title="$(python3 -c 'import json,os; print(json.load(open(os.environ["QA_EVIDENCE"]+"/upgrade-results.json"))["checkpoints"][-1]["recipe"])')"
-                if ! python3 "$foodcom_helper" --execute --base-harness scripts/qa/android-native-upgrade.py \
-                    --base-harness-sha256 "$base_harness_sha" --base-evidence "$QA_EVIDENCE" \
-                    --manifest "$foodcom_manifest" --apk70-sha256 "$APK70_SHA256" \
-                    --fixture-title "$fixture_title" --adb "$adb" --serial "$ANDROID_SERIAL" --evidence "$foodcom_dir"; then
-                  smoke_failed=1
+              if [[ "$result" != 0 && -d "$functional_dir" ]]; then
+                observation="$(find "$functional_dir" -maxdepth 1 -type f -name '*-unverified.xml' -print -quit)"
+                if [[ -n "$observation" ]]; then
+                  printf '\nSanitized UI snapshot excerpt (up to 60 lines).\n\n'
+                  awk 'NR <= 60 { print "    " substr($0, 1, 360) }' "$observation"
                 fi
-              else
-                echo 'The reviewed public Food.com helper or manifest checksum changed.' >&2
-                smoke_failed=1
               fi
-              if [[ ! -f "$foodcom_dir/foodcom-native-result.json" ]]; then
-                mkdir -p "$foodcom_dir"
-                printf '%s\n' '{"status":"failed","scope":"optional-native-public-foodcom","failureStage":"preflight"}' \
-                  >"$foodcom_dir/foodcom-native-result.json"
-              fi
-            fi
-            exit "$smoke_failed"
+            } >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$RUN_FUNCTIONAL_DEMO" == true ]]; then
+            printf '\n### Fresh offline demo on APK 73\n\nNOT_RUN. Package upgrade and cache verification did not pass.\n' \
+              >> "$GITHUB_STEP_SUMMARY"
           fi
+          exit "$result"
 
-      - name: Upload synthetic QA checkpoints
-        if: ${{ always() }}
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: android-staging-upgrade-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/android-qa-evidence/*.json
-            ${{ runner.temp }}/android-qa-evidence/*.png
-            ${{ runner.temp }}/android-qa-evidence/apk*-recipe.mp4
-            ${{ runner.temp }}/android-qa-evidence/acceleration.txt
-            ${{ runner.temp }}/android-qa-evidence/emulator.txt
-            ${{ runner.temp }}/android-qa-evidence/native-smoke/receiver-build.json
-            ${{ runner.temp }}/android-qa-evidence/native-smoke/*/supplemental-results.json
-            ${{ runner.temp }}/android-qa-evidence/native-smoke/*/failure-diagnostics.json
-            ${{ runner.temp }}/android-qa-evidence/native-smoke/*/native-*.png
-            ${{ runner.temp }}/android-qa-evidence/native-smoke/pdf/native-recipe.pdf
-            ${{ runner.temp }}/android-qa-evidence/native-smoke/gallery/qa-native-image.png
-            ${{ runner.temp }}/android-qa-evidence/native-smoke/foodcom/foodcom-native-result.json
-            ${{ runner.temp }}/android-qa-evidence/native-smoke/foodcom/foodcom-native-before-download.png
-            ${{ runner.temp }}/android-qa-evidence/native-smoke/foodcom/foodcom-native-installed.png
-            ${{ runner.temp }}/android-qa-evidence/native-smoke/foodcom/foodcom-offline-ready.png
-            ${{ runner.temp }}/android-qa-evidence/native-smoke/foodcom/foodcom-offline-detail-194.png
-            ${{ runner.temp }}/android-qa-evidence/native-smoke/foodcom/foodcom-native-failure.png
-          if-no-files-found: ignore
-          retention-days: 2
+      - name: Remove temporary APK inputs, AVD and demo evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          runner_root="$(realpath -e -- "$RUNNER_TEMP")"
+          [[ -d "$runner_root" && "$runner_root" != / ]]
+          inputs="$runner_root/apk73-inputs"
+          avd="$runner_root/apk73-android-avd"
+          functional_dir="$runner_root/apk73-functional-evidence"
+          for directory in "$inputs" "$avd" "$functional_dir"; do
+            [[ ! -L "$directory" && "$(realpath -m -- "$directory")" == "$directory" ]]
+            [[ ! -e "$directory" || -d "$directory" ]]
+          done
+          rm -f -- "$inputs/apk72.apk" "$inputs/apk73.apk" \
+            "$inputs/apk72.download" "$inputs/apk73.download"
+          for directory in "$avd" "$functional_dir"; do
+            if [[ -d "$directory" ]]; then rm -rf -- "$directory"; fi
+          done
