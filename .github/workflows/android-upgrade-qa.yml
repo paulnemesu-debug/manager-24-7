@@ -23,6 +23,10 @@ on:
         description: Probe synthetic recipe PDF and gallery after the offline APK73 upgrade
         type: boolean
         default: false
+      adapt_bridge_libraries:
+        description: Run only a separate file-based library compatibility test on the disposable x86_64 guest
+        type: boolean
+        default: false
       probe_arm_host:
         description: Check capabilities of an ARM64 runner without fetching APK inputs
         type: boolean
@@ -163,6 +167,7 @@ jobs:
           PROBE_DEMO_CACHE: ${{ inputs.probe_demo_cache }}
           RUN_FUNCTIONAL_DEMO: ${{ inputs.run_functional_demo }}
           RUN_NATIVE_EXTRA: ${{ inputs.run_native_extra }}
+          ADAPT_BRIDGE_LIBRARIES: ${{ inputs.adapt_bridge_libraries }}
         run: |
           set -euo pipefail
           adb="$ANDROID_HOME/platform-tools/adb"
@@ -199,20 +204,26 @@ jobs:
           "$adb" -s "$ANDROID_SERIAL" shell wm dismiss-keyguard
           args=()
           if [[ "$PROBE_DEMO_CACHE" == true ]]; then args+=(--probe-demo-cache); fi
+          compatibility_args=()
+          if [[ "$ADAPT_BRIDGE_LIBRARIES" == true ]]; then compatibility_args+=(--adapt-bridge-libraries); fi
           result=0
-          python3 scripts/qa/apk73-native-upgrade.py native "${args[@]}" \
+          python3 scripts/qa/apk73-native-upgrade.py native "${args[@]}" "${compatibility_args[@]}" \
             --apk-dir "$QA_APK_DIR" --report "$report" --adb "$adb" --serial "$ANDROID_SERIAL" \
             --aapt "$build_tools/aapt" --apksigner "$build_tools/apksigner" || result=$?
           native_result="$result"
           if [[ -s "$report" ]]; then
             {
-              printf '### APK 72 to 73 native QA\n\n'
+              if [[ "$ADAPT_BRIDGE_LIBRARIES" == true ]]; then
+                printf '### APK 72 to 73 emulator compatibility with extracted ARM64 libraries\n\n'
+              else
+                printf '### APK 72 to 73 native QA\n\n'
+              fi
               sed 's/^/    /' "$report"
             } >> "$GITHUB_STEP_SUMMARY"
           fi
           if [[ "$RUN_FUNCTIONAL_DEMO" == true && "$result" == 0 ]]; then
             functional_dir="$RUNNER_TEMP/apk73-functional-evidence"
-            python3 scripts/qa/apk73-functional-qa.py --execute \
+            python3 scripts/qa/apk73-functional-qa.py --execute "${compatibility_args[@]}" \
               --adb "$adb" --serial "$ANDROID_SERIAL" --upgrade-report "$report" \
               --apk73-sha256 "${APK73_SHA256,,}" --evidence "$functional_dir" || result=$?
             {
@@ -244,7 +255,7 @@ jobs:
             extra_result=0
             python3 "$extra_dir/receiver/build.py" --sdk "$ANDROID_HOME" --jdk "${JAVA_HOME:-}" || extra_result=$?
             if [[ "$extra_result" == 0 ]]; then
-              timeout 660 python3 -B scripts/qa/apk73_native_extra.py --execute \
+              timeout 660 python3 -B scripts/qa/apk73_native_extra.py --execute "${compatibility_args[@]}" \
                 --adb "$adb" --serial "$ANDROID_SERIAL" --upgrade-report "$report" \
                 --apk73-sha256 "${APK73_SHA256,,}" --report "$extra_dir/recipe-native-report.json" \
                 --receiver-apk "$extra_dir/receiver/out/qa-pdf-sink.apk" \
@@ -281,7 +292,7 @@ jobs:
         if: ${{ !cancelled() && steps.visual_evidence.outputs.paths != '' }}
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: apk73-offline-demo-screenshots
+          name: ${{ inputs.adapt_bridge_libraries && 'apk73-adapted-emulator-demo-screenshots' || 'apk73-offline-demo-screenshots' }}
           path: ${{ steps.visual_evidence.outputs.paths }}
           if-no-files-found: error
           retention-days: 1

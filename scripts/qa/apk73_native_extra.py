@@ -286,6 +286,8 @@ def gallery_probe(guest, title, recipe_id, stage):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--execute", action="store_true")
+    parser.add_argument("--adapt-bridge-libraries", action="store_true",
+                        help="Require and verify the explicit adapted runtime receipt")
     parser.add_argument("--adb", required=True)
     parser.add_argument("--serial", required=True)
     parser.add_argument("--upgrade-report", type=Path, required=True)
@@ -304,11 +306,15 @@ def main():
         parser.error("Choose a new supplemental JSON report path")
 
     report = {"status": "INCOMPLETE", "scope": "disposable-offline-synthetic-demo", "checks": {}}
+    if args.adapt_bridge_libraries:
+        report.update(native.runtime_identity(True))
+        report["runtimeAdaptation"].pop("versions")
     try:
         guest = ExtraGuest(args.adb, args.serial)
         prior = json.loads(args.upgrade_report.read_text(encoding="utf-8"))
+        native.require_runtime_receipt(prior, args.adapt_bridge_libraries)
         apks = {item["versionCode"]: item["sha256"] for item in prior["apks"]}
-        require(prior["status"] == "PASS" and prior["artifactType"] == "original-signed-arm64-apks"
+        require(prior["status"] == "PASS"
                 and apks == {72: native.APK72_SHA256, 73: args.apk73_sha256},
                 "Expected completed native QA on the exact original APKs")
         guest.verify_boot()
@@ -317,6 +323,9 @@ def main():
                 and guest.property("ro.debuggable") == "1"
                 and guest.run("Verify existing emulator diagnostic access", "shell", "id", "-u").strip() == "0",
                 "The live guest does not match the tested APK73 or lacks diagnostic access")
+        if args.adapt_bridge_libraries:
+            guest.verify_live_bridge_receipt(prior, args.apk73_sha256)
+            report["runtimeAdaptation"]["verifiedReceipt"] = True
         for index, probe in enumerate(("pdf", "gallery"), start=1):
             if args.probe not in ("both", probe):
                 continue

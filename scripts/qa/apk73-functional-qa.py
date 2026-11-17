@@ -337,7 +337,8 @@ def run_probes(args, report):
     guest = DemoGuest(args.adb, args.serial)
     prior = json.loads(args.upgrade_report.read_text(encoding="utf-8"))
     checks = prior.get("checks", {})
-    require(prior.get("status") == "PASS" and prior.get("artifactType") == "original-signed-arm64-apks"
+    native.require_runtime_receipt(prior, args.adapt_bridge_libraries)
+    require(prior.get("status") == "PASS"
             and all(checks.get(key) == "PASS" for key in
                     ("apk73_in_place_update", "apk73_launch_after_update", "synthetic_demo_cache")),
             "A completed passing original ARM64 upgrade and cache report is required")
@@ -349,6 +350,9 @@ def run_probes(args, report):
     require(guest.property("ro.debuggable") == "1"
             and guest.run("Inspect guest diagnostic access", "shell", "id", "-u").strip() == "0",
             "Existing read-only diagnostic access is required")
+    if args.adapt_bridge_libraries:
+        guest.verify_live_bridge_receipt(prior, args.apk73_sha256)
+        report["runtimeAdaptation"]["verifiedReceipt"] = True
 
     observe = lambda name, selector, **options: guest.observe(name, args.evidence, selector, **options)
     click = lambda name, names, **options: observe(name, lambda tree: control(tree, names, clickable=True),
@@ -422,6 +426,8 @@ def main():
     parser.add_argument("--apk73-sha256")
     parser.add_argument("--evidence", type=Path, help="New local evidence directory")
     parser.add_argument("--execute", action="store_true", help="Confirm reset and writes to synthetic guest demo")
+    parser.add_argument("--adapt-bridge-libraries", action="store_true",
+                        help="Require and verify the explicit adapted runtime receipt")
     parser.add_argument("--list-screenshots", type=Path, help="Print only existing approved PNG paths for upload")
     args = parser.parse_args()
     if args.list_screenshots:
@@ -435,6 +441,9 @@ def main():
     report = {"status": "INCOMPLETE", "scope": "offline-synthetic-demo-only",
               "stage": "preflight", "authenticatedContinuity": "NOT_RUN",
               "visualEvidence": {"captured": [], "unverified": {}}}
+    if args.adapt_bridge_libraries:
+        report.update(native.runtime_identity(True))
+        report["runtimeAdaptation"].pop("versions")
     try:
         run_probes(args, report)
         report.update(status="PASS", stage="complete")

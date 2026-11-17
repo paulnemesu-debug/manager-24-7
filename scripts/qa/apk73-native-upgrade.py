@@ -7,15 +7,17 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import sqlite3
+import stat
 import subprocess
 import tempfile
 import time
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import HTTPRedirectHandler, build_opener
 from xml.etree import ElementTree
-from zipfile import ZipFile
+from zipfile import BadZipFile, ZipFile
 
 
 PACKAGE = "ro.paradim.professionalfoodcost"
@@ -31,6 +33,10 @@ DEMO_LABELS = {"Vezi demo instant", "View instant demo"}
 HOME_LABELS = {"Acasă", "Home"}
 STORAGE_DB = f"/data/user/0/{PACKAGE}/databases/RKStorage"
 DEMO_HR_KEY = "manager247.hr.v1.demo"
+NORMAL_ARTIFACT = "original-signed-arm64-apks"
+ADAPTED_ARTIFACT = "original-signed-arm64-apks-file-library-compatibility"
+BRIDGE_ADAPTATION = "verified-arm64-files-in-installed-native-library-dir"
+ARM64_ENTRY = re.compile(r"lib/arm64-v8a/(lib[A-Za-z0-9_.+-]+\.so)")
 
 
 class CheckError(Exception):
@@ -88,6 +94,82 @@ def crash_findings(log):
 def sha256_file(path):
     with path.open("rb") as source:
         return hashlib.file_digest(source, "sha256").hexdigest()
+
+
+def bridge_install_paths(metadata, pm_paths):
+    def read_one(key):
+        values = re.findall(rf"^\s*{key}=([^\s]+)\s*$", metadata, re.M)
+        require(len(values) == 1, "Installed native library metadata is ambiguous")
+        return values[0]
+
+    code = read_one("codePath")
+    install_root = rf"/data/app/(?:~~[A-Za-z0-9_-]+={{0,2}}/)?{re.escape(PACKAGE)}-[A-Za-z0-9_-]+={{0,2}}"
+    require(re.fullmatch(install_root, code), "Installed package code path is outside the reviewed /data/app layout")
+    require(read_one("primaryCpuAbi") == "arm64-v8a" and read_one("legacyNativeLibraryDir") == code + "/lib",
+            "Installed native library directory does not match the ARM64 app code path")
+    require(pm_paths.strip().splitlines() == [f"package:{code}/base.apk"],
+            "PackageManager did not report the same single installed base APK")
+    return code, code + "/lib/arm64"
+
+
+def extract_arm64_libraries(apk, directory):
+    results = {}
+    try:
+        with ZipFile(apk) as archive:
+            for entry in archive.infolist():
+                if not entry.filename.startswith("lib/arm64-v8a/") or entry.is_dir():
+                    continue
+                match = ARM64_ENTRY.fullmatch(entry.filename)
+                require(match and stat.S_IFMT(entry.external_attr >> 16) in (0, stat.S_IFREG),
+                        "Invalid ARM64 native library archive path or file type")
+                name = match[1]
+                require(name not in results, "Duplicate ARM64 native library name")
+                target = directory / name
+                with archive.open(entry) as source:
+                    header = source.read(64)
+                    require(len(header) == 64 and header[:7] == b"\x7fELF\x02\x01\x01"
+                            and header[16:20] == b"\x03\x00\xb7\x00",
+                            "Native library is not a little-endian ELF64 AArch64 shared object")
+                    with target.open("xb") as destination:
+                        destination.write(header)
+                        # Consuming the ZIP stream to EOF verifies this entry's CRC.
+                        shutil.copyfileobj(source, destination)
+                require(target.stat().st_size == entry.file_size, "Native library archive byte count mismatch")
+                results[name] = {"name": name, "sha256": sha256_file(target), "crc32": f"{entry.CRC:08x}"}
+    except BadZipFile:
+        raise CheckError("ARM64 native library archive is corrupt or failed CRC verification") from None
+    require("libreactnative.so" in results, "The original ARM64 React Native library was not found")
+    return [results[name] for name in sorted(results)]
+
+
+def runtime_identity(adapted):
+    if not adapted:
+        return {"artifactType": NORMAL_ARTIFACT}
+    return {"artifactType": ADAPTED_ARTIFACT, "normalRuntimeAcceptance": "NOT_VERIFIED",
+            "runtimeAdaptation": {"method": BRIDGE_ADAPTATION, "versions": {}}}
+
+
+def require_runtime_receipt(report, adapted):
+    require(report.get("artifactType") == (ADAPTED_ARTIFACT if adapted else NORMAL_ARTIFACT),
+            "The native result does not match the explicitly requested runtime mode")
+    if adapted:
+        adaptation = report.get("runtimeAdaptation", {})
+        versions = adaptation.get("versions", {})
+        checks = report.get("checks", {})
+        apks = {str(item.get("versionCode")): item.get("sha256") for item in report.get("apks", [])}
+        require(report.get("normalRuntimeAcceptance") == "NOT_VERIFIED"
+                and adaptation.get("method") == BRIDGE_ADAPTATION and set(versions) == set(apks) == {"72", "73"}
+                and all(checks.get(f"apk{version}_bridge_library_adaptation") == "PASS"
+                        and proof.get("signedApkBytesUnchanged") is True and proof.get("installedApkSha256") == apks[version]
+                        and re.fullmatch(r"[a-f0-9]{64}", apks[version] or "")
+                        and re.fullmatch(r"[a-f0-9]{64}", proof.get("installationPathSha256", ""))
+                        and proof.get("elf") == "ELF64-AArch64" and proof.get("libraries")
+                        for version, proof in versions.items())
+                and versions["72"]["installationPathSha256"] != versions["73"]["installationPathSha256"],
+                "The adapted runtime result lacks matching signed APK evidence")
+    else:
+        require("runtimeAdaptation" not in report and "normalRuntimeAcceptance" not in report,
+                "An adapted runtime result cannot be used for normal runtime acceptance")
 
 
 def protected_urls(value):
@@ -225,6 +307,118 @@ class Emulator:
 
     def stop(self):
         self.run("Stop isolated test app", "shell", "am", "force-stop", PACKAGE)
+
+    def bridge_file_sha(self, path, *, absent=False):
+        quoted = shlex.quote(path)
+        check = f"p={quoted}; test ! -L \"$p\" || exit 1; "
+        if absent:
+            check += 'if test ! -e "$p"; then printf absent; exit 0; fi; '
+        check += 'test -f "$p" && test "$(readlink -f "$p")" = "$p" && sha256sum "$p"'
+        value = self.run("Verify a scoped emulator file", "shell", check, timeout=50).strip()
+        if absent and value == "absent":
+            return None
+        match = re.fullmatch(r"([a-f0-9]{64})\s+" + re.escape(path), value)
+        require(match, "The scoped emulator file SHA-256 could not be read")
+        return match[1]
+
+    def current_bridge_paths(self):
+        package = self.run("Read installed package native library metadata", "shell", "dumpsys", "package", PACKAGE)
+        paths = self.run("Read current installed package APK path", "shell", "pm", "path", "--user", "0", PACKAGE)
+        return bridge_install_paths(package, paths)
+
+    def verify_live_bridge_receipt(self, prior, expected_sha):
+        require(self.property("ro.product.cpu.abi") == "x86_64",
+                "The adapted runtime receipt applies to an x86_64 bridge guest")
+        code, lib = self.current_bridge_paths()
+        proof = prior["runtimeAdaptation"]["versions"]["73"]
+        require(hashlib.sha256(code.encode()).hexdigest() == proof["installationPathSha256"]
+                and self.bridge_file_sha(code + "/base.apk") == expected_sha,
+                "The current guest APK73 installation does not match the adapted runtime receipt")
+        for entry in proof["libraries"]:
+            name = entry["name"]
+            require(ARM64_ENTRY.fullmatch("lib/arm64-v8a/" + name)
+                    and self.bridge_file_sha(lib + "/" + name) == entry["sha256"],
+                    "Live APK73 native libraries do not match the adapted runtime receipt")
+
+    def adapt_bridge_libraries(self, apk, expected_sha, version, *, previous_code=None):
+        self.verify_boot()
+        require(self.property("ro.product.cpu.abi") == "x86_64" and self.property("ro.debuggable") == "1",
+                "Bridge adaptation requires the verified debuggable x86_64 emulator")
+        self.offline()
+        self.run("Open disposable emulator diagnostic access", "root")
+        self.run("Wait for diagnostic ADB transport", "wait-for-device", timeout=25)
+        require(self.run("Verify diagnostic UID", "shell", "id", "-u").strip() == "0",
+                "Bridge adaptation requires diagnostic root in the disposable emulator")
+        self.verify_boot()
+        self.offline()
+        self.package_info(version)
+        self.stop()
+        state = self.run("Verify the installed application is stopped", "shell",
+                         f"pidof {PACKAGE} >/dev/null; [ $? -eq 1 ] && printf stopped")
+        require(state.strip() == "stopped", "The installed application was not stopped before adaptation")
+        code, lib = self.current_bridge_paths()
+        require(code != previous_code, "APK73 did not get a new code path after the exact in-place upgrade")
+        base = code + "/base.apk"
+        require(sha256_file(apk) == expected_sha and self.bridge_file_sha(base) == expected_sha,
+                "The installed APK bytes differ from the original verified artifact")
+
+        roots = (code + "/lib", lib)
+        for directory in roots:
+            quoted = shlex.quote(directory)
+            self.run("Reject links or noncanonical native library directories", "shell",
+                     f"p={quoted}; test ! -L \"$p\" && {{ test ! -e \"$p\" || "
+                     ' { test -d "$p" && test "$(readlink -f "$p")" = "$p"; }; }')
+
+        with tempfile.TemporaryDirectory(prefix="apk73-arm64-libraries-") as temporary:
+            source = Path(temporary)
+            libraries = extract_arm64_libraries(apk, source)
+            missing = []
+            for record in libraries:
+                actual = self.bridge_file_sha(f"{lib}/{record['name']}", absent=True)
+                require(actual in (None, record["sha256"]), "A different native library already exists in the emulator")
+                if actual is None:
+                    missing.append(record)
+            if missing:
+                self.install_bridge_files(source, roots, missing)
+            for record in libraries:
+                require(self.bridge_file_sha(f"{lib}/{record['name']}") == record["sha256"],
+                        "An installed ARM64 library failed SHA-256 readback")
+
+        require(sha256_file(apk) == expected_sha and self.bridge_file_sha(base) == expected_sha,
+                "The original APK bytes did not remain identical after bridge adaptation")
+        self.offline()
+        proof = {"signedApkBytesUnchanged": True, "installedApkSha256": expected_sha,
+                 "installationPathSha256": hashlib.sha256(code.encode()).hexdigest(),
+                 "elf": "ELF64-AArch64", "libraries": libraries, "newFileCount": len(missing)}
+        return code, proof
+
+    def install_bridge_files(self, source, roots, files):
+        for directory in roots:
+            quoted = shlex.quote(directory)
+            self.run("Prepare only the installed package native library directory", "shell",
+                     f"set -e; p={quoted}; test ! -L \"$p\"; "
+                     'if test ! -e "$p"; then mkdir -m 0755 "$p"; restorecon "$p"; fi; '
+                     'test -d "$p"; test "$(readlink -f "$p")" = "$p"')
+        stage = self.run("Create a disposable guest transfer directory", "shell", "mktemp", "-d",
+                         "/data/local/tmp/manager247-bridge.XXXXXXXX").strip()
+        require(re.fullmatch(r"/data/local/tmp/manager247-bridge\.[A-Za-z0-9]{8}", stage),
+                "Guest transfer directory did not use the reviewed temporary path")
+        try:
+            for record in files:
+                name = record["name"]
+                staged = stage + "/" + name
+                dest = roots[-1] + "/" + name
+                self.run("Copy one verified ARM64 archive entry to staging", "push", source / name, staged, timeout=45)
+                require(self.bridge_file_sha(staged) == record["sha256"], "Staged ARM64 library hash differs")
+                destination = shlex.quote(dest)
+                entry = shlex.quote(staged)
+                self.run("Install the ARM64 library without replacing an existing file", "shell",
+                         f"set -eC; p={destination}; test ! -L \"$p\"; test ! -e \"$p\"; "
+                         f'cat {entry} > "$p"; chmod 0755 "$p"; restorecon "$p"')
+        finally:
+            for record in files:
+                self.probe("Remove the exact staged ARM64 entry", "shell", "rm", "-f", stage + "/" + record["name"])
+            self.probe("Remove the empty guest transfer directory", "shell", "rmdir", stage)
 
     def probe(self, label, *args, timeout=8):
         try:
@@ -399,8 +593,12 @@ def main():
     parser.add_argument("--adb", default="adb")
     parser.add_argument("--serial", default="emulator-5554")
     parser.add_argument("--probe-demo-cache", action="store_true")
+    parser.add_argument("--adapt-bridge-libraries", action="store_true",
+                        help="Use the explicit file-based library compatibility mode in a disposable x86_64 guest")
     args = parser.parse_args()
-    report = {"status": "NOT_RUN", "artifactType": "original-signed-arm64-apks", "checks": {},
+    if args.adapt_bridge_libraries and args.phase != "native":
+        parser.error("Bridge library adaptation applies only to the native compatibility test")
+    report = {"status": "NOT_RUN", **runtime_identity(args.adapt_bridge_libraries), "checks": {},
               "authenticatedContinuity": "NOT_RUN", "hrAndHaccpFunctionalCoverage": "NOT_RUN"}
     checks = report["checks"]
     stage = "apk_provenance"
@@ -438,6 +636,13 @@ def main():
             guest.install(files[72])
             baseline = guest.package_info(72)
             report["installed"] = [baseline]
+            initial_code = None
+            if args.adapt_bridge_libraries:
+                stage = "apk72_bridge_library_adaptation"
+                initial_code, proof = guest.adapt_bridge_libraries(files[72], artifacts[72], 72)
+                report["runtimeAdaptation"]["versions"]["72"] = proof
+                checks[stage] = "PASS"
+                stage = "apk72_install_and_launch"
             launches = report["launch"] = {"apk72": {}}
             guest.launch(launches["apk72"])
             checks[stage] = "PASS"
@@ -465,6 +670,11 @@ def main():
                     checks["synthetic_demo_cache"] = "UNVERIFIED" if before_cache == after_install_cache else "FAIL"
                 except (CheckError, sqlite3.Error, ValueError, OSError):
                     checks["synthetic_demo_cache"] = "UNVERIFIED"
+            if args.adapt_bridge_libraries:
+                stage = "apk73_bridge_library_adaptation"
+                _, proof = guest.adapt_bridge_libraries(files[73], artifacts[73], 73, previous_code=initial_code)
+                report["runtimeAdaptation"]["versions"]["73"] = proof
+                checks[stage] = "PASS"
             stage = "apk73_launch_after_update"
             launches["apk73"] = {}
             guest.launch(launches["apk73"])
