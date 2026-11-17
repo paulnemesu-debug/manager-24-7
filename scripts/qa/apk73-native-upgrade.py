@@ -20,6 +20,8 @@ from zipfile import ZipFile
 
 PACKAGE = "ro.paradim.professionalfoodcost"
 ACTIVITY = PACKAGE + "/.MainActivity"
+MAIN_COMPONENTS = {ACTIVITY, f"{PACKAGE}/{PACKAGE}.MainActivity"}
+LAUNCH_READY_SECONDS = 150
 SIGNER = "b7125f9e38bd66ba1226b0ff063d15569320006f3b193a1da297d485deeec3ed"
 APK72_SHA256 = "082147d74a7c8801a57fa120436baf44975e1bcc249b9c4fdc5b61432323f996"
 # Pin the staging host without writing its address into a public QA branch.
@@ -35,23 +37,52 @@ class CheckError(Exception):
     """Only static, safe messages are allowed to reach the runner summary."""
 
 
+class CommandTimeout(CheckError):
+    """A bounded host-side command exceeded its time budget."""
+
+
 def require(condition, message):
     if not condition:
         raise CheckError(message)
 
 
-def command(label, args, timeout=30, allow_failure=False):
+def command(label, args, timeout=30, allow_failure=False, include_stderr=False):
     try:
         process = subprocess.run(
             [str(arg) for arg in args], capture_output=True, text=True, encoding="utf-8",
             errors="replace", timeout=timeout, check=False,
         )
-    except (OSError, subprocess.TimeoutExpired):
-        raise CheckError(label + " unavailable or timed out") from None
+    except subprocess.TimeoutExpired:
+        raise CommandTimeout(label + " timed out") from None
+    except OSError:
+        raise CheckError(label + " unavailable") from None
     if allow_failure and process.returncode:
         return None
     require(process.returncode == 0, label + " failed")
-    return process.stdout.replace("\r", "")
+    output = process.stdout + ("\n" + process.stderr if include_stderr else "")
+    return output.replace("\r", "")
+
+
+def crash_findings(log):
+    """Identify fixed error categories only from crash records anchored to this package."""
+    process = re.compile(r"(?m)^(?:Process:|Cmdline:)\s*([^,\s]+)|>>>\s+([^\s<]+)\s+<<<")
+    patterns = {
+        "JAVA_RUNTIME": r"(?m)^java\.lang\.RuntimeException\b",
+        "REACT_NATIVE_JS": r"\bcom\.facebook\.react\.common\.JavascriptException\b",
+        "REACT_NATIVE_DSO_NOT_FOUND": r"\bcouldn't find DSO to load: libreactnative\.so\b",
+        "SOLOADER_APK_ABI_MISMATCH": (
+            r"(?s)ApplicationSoSource[^\n]*/lib/arm64\b.*?DirectApkSoSource[^\n]*!/lib/x86_64\b"
+        ),
+        "UNSATISFIED_LINK": r"\bjava\.lang\.UnsatisfiedLinkError\b",
+        "CLASS_NOT_FOUND": r"\b(?:java\.lang\.ClassNotFoundException|java\.lang\.NoClassDefFoundError)\b",
+        "SIGSEGV": r"\bsignal \d+ \(SIGSEGV\)",
+        "SIGABRT": r"\bsignal \d+ \(SIGABRT\)",
+        "SIGILL": r"\bsignal \d+ \(SIGILL\)",
+        "NATIVE_BRIDGE_FRAME": r"(?m)^\s*#\d+\s+pc\s+[0-9a-fA-F]+\s+[^\s]*libndk_translation\.so\b",
+    }
+    records = re.split(r"(?m)(?=^FATAL EXCEPTION:|^\*\*\* \*\*\* \*\*\*)", log)
+    scoped = [record for record in records if {m[1] or m[2] for m in process.finditer(record)} == {PACKAGE}]
+    return [name for name, pattern in patterns.items() if any(re.search(pattern, record) for record in scoped)]
 
 
 def sha256_file(path):
@@ -195,37 +226,136 @@ class Emulator:
     def stop(self):
         self.run("Stop isolated test app", "shell", "am", "force-stop", PACKAGE)
 
-    def launch(self):
-        result = self.run("Launch Android main activity", "shell", "am", "start", "-W", "-n", ACTIVITY, timeout=60)
-        require(re.search(r"^Status:\s+ok\s*$", result, re.M)
-                and re.search(r"^Activity:\s+" + re.escape(PACKAGE) + r"/", result, re.M),
-                "Android did not launch the expected main activity")
-        self.find_visible(DEMO_LABELS)
-        pid = self.run("Android app process", "shell", "pidof", PACKAGE).strip()
-        require(re.fullmatch(r"\d+(?: \d+)*", pid), "Expected an active app process after loading sign-in")
+    def probe(self, label, *args, timeout=8):
+        try:
+            return self.run(label, *args, timeout=timeout, allow_failure=True)
+        except CheckError:
+            return None
+
+    def focus(self):
+        window = self.probe("Foreground window", "shell", "dumpsys", "window", "windows")
+        if window is None:
+            return "UNAVAILABLE"
+        match = re.search(r"^\s*mCurrentFocus=Window\{[^\n}]*\bu0\s+([^\s}]+)", window, re.M)
+        if not match:
+            return "NO_FOCUSED_WINDOW"
+        if match[1] in MAIN_COMPONENTS:
+            return "MAIN_ACTIVITY"
+        return "OTHER_WINDOW"
+
+    def app_process(self):
+        pid = self.probe("Android app process", "shell", "pidof", PACKAGE)
+        if pid and re.fullmatch(r"\d+(?: \d+)*", pid.strip()):
+            return pid.strip()
+        return None
+
+    def launch_diagnostics(self):
+        transport = self.probe("Guest ADB transport", "get-state", timeout=5)
+        exit_info = self.probe("Android app exit information", "shell", "dumpsys", "activity", "exit-info", PACKAGE)
+        crashes = self.probe("Recent app crash records", "shell", "logcat", "-b", "crash",
+                             "-d", "-v", "raw", "-t", "240")
+        bridge = self.probe("Recent native bridge errors", "shell", "logcat", "-b", "main", "-b", "system",
+                            "-d", "-v", "raw", "-t", "240", "NativeBridge:W", "*:S")
+        bridge_errors = [
+            name for name, pattern in {
+                "BRIDGE_LOAD_FAILURE": r"(?:fail|unable|cannot|couldn't)[^\n]*(?:load|initialize|open)",
+                "BRIDGE_UNSUPPORTED_ABI": r"unsupported[^\n]*\b(?:abi|arm64)\b",
+            }.items()
+            if bridge and re.search(pattern, bridge, re.I)
+        ]
+        return {
+            "adbConnected": transport.strip() == "device" if transport else None,
+            "foreground": self.focus(),
+            "processAlive": self.app_process() is not None,
+            "recentAppExitReasonCodes": [
+                int(reason) for reason in re.findall(r"\breason=(\d{1,2})\b", exit_info or "")[:5]
+            ] if exit_info is not None else None,
+            "appCrashCategories": crash_findings(crashes) if crashes is not None else None,
+            "guestNativeBridgeErrors": bridge_errors if bridge is not None else None,
+        }
+
+    def launch(self, evidence=None):
+        evidence = {} if evidence is None else evidence
+        start = time.monotonic()
+        evidence.update(launcher="UNVERIFIED", dispatch="NOT_RUN", readiness="NOT_RUN", uiProbeTimeouts=0)
+        intent = ("-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER")
+        try:
+            resolution = self.run("Resolve Android package launcher", "shell", "cmd", "package", "resolve-activity",
+                                  "--brief", "--user", "0", *intent, "-p", PACKAGE, timeout=10)
+            components = {line.strip() for line in resolution.splitlines() if line.strip() in MAIN_COMPONENTS}
+            require(len(components) == 1, "Android did not resolve the exact Manager 24/7 launcher")
+            component = next(iter(components))
+            evidence["launcher"] = "MATCHED"
+            try:
+                # Issue the launcher request without tying ADB lifetime to Android's draw wait.
+                result = self.run("Dispatch Android main activity", "shell", "am", "start", "--user", "0",
+                                  *intent, "-n", component, timeout=15, include_stderr=True)
+            except CommandTimeout:
+                evidence["dispatch"] = "TIMED_OUT"
+                raise
+            except CheckError:
+                evidence["dispatch"] = "COMMAND_FAILED"
+                raise
+            started = re.search(r"^Starting: [^\n]*\bcmp=([^\s}]+)", result, re.M)
+            if not started or started[1] not in MAIN_COMPONENTS or re.search(r"^\s*Error\b", result, re.M):
+                evidence["dispatch"] = "REJECTED"
+                raise CheckError("Android rejected or did not confirm the launcher request")
+            evidence.update(dispatch="ACCEPTED", readiness="WAITING_FOR_SIGN_IN")
+            deadline = time.monotonic() + LAUNCH_READY_SECONDS
+            while time.monotonic() < deadline:
+                if self.focus() == "MAIN_ACTIVITY" and (pid := self.app_process()) is not None:
+                    try:
+                        demo = self.visible_once(DEMO_LABELS)
+                    except CommandTimeout:
+                        evidence["uiProbeTimeouts"] += 1
+                    except CheckError:
+                        pass
+                    else:
+                        if demo is not None and self.focus() == "MAIN_ACTIVITY" and self.app_process() == pid:
+                            evidence["readiness"] = "SIGN_IN_VISIBLE"
+                            return
+                time.sleep(1)
+            evidence["readiness"] = "TIMED_OUT"
+            raise CheckError("Expected foreground MainActivity, visible Instant Demo sign-in control and stable process")
+        except CheckError:
+            evidence["diagnostics"] = self.launch_diagnostics()
+            raise
+        finally:
+            evidence["elapsedMs"] = round((time.monotonic() - start) * 1000)
+
+    def visible_once(self, labels):
+        on_device = "/data/local/tmp/manager247-apk73-qa.xml"
+        self.run("Clear prior UI observation", "shell", "rm", "-f", on_device, timeout=5)
+        try:
+            dumped = self.run("Read current UI hierarchy", "shell", "uiautomator", "dump", on_device,
+                              timeout=20, allow_failure=True)
+            if not dumped or "dumped to" not in dumped.lower():
+                return None
+            xml = self.run("Inspect test UI in memory", "exec-out", "cat", on_device, timeout=8)
+            tree = ElementTree.fromstring(xml)
+            for node in tree.iter("node"):
+                labels_in_node = {node.get("text", "").strip(), node.get("content-desc", "").strip()}
+                if node.get("package") == PACKAGE and labels & labels_in_node:
+                    bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
+                    if bounds:
+                        left, top, right, bottom = map(int, bounds.groups())
+                        if left < right and top < bottom:
+                            return (left + right) // 2, (top + bottom) // 2
+        except ElementTree.ParseError:
+            return None
+        finally:
+            self.probe("Remove the guest UI observation", "shell", "rm", "-f", on_device, timeout=5)
+        return None
 
     def find_visible(self, labels):
         deadline = time.monotonic() + 85
-        on_device = "/data/local/tmp/manager247-apk73-qa.xml"
         while time.monotonic() < deadline:
-            self.run("Clear prior UI observation", "shell", "rm", "-f", on_device, timeout=5)
-            dumped = self.run("Read current UI hierarchy", "shell", "uiautomator", "dump", on_device,
-                              timeout=20, allow_failure=True)
-            if dumped and "dumped to" in dumped.lower():
-                xml = self.run("Inspect test UI in memory", "exec-out", "cat", on_device, timeout=8)
-                try:
-                    tree = ElementTree.fromstring(xml)
-                except ElementTree.ParseError:
-                    time.sleep(1)
-                    continue
-                for node in tree.iter("node"):
-                    labels_in_node = {node.get("text", "").strip(), node.get("content-desc", "").strip()}
-                    if node.get("package") == PACKAGE and labels & labels_in_node:
-                        bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
-                        if bounds:
-                            left, top, right, bottom = map(int, bounds.groups())
-                            if left < right and top < bottom:
-                                return (left + right) // 2, (top + bottom) // 2
+            try:
+                location = self.visible_once(labels)
+                if location is not None:
+                    return location
+            except CommandTimeout:
+                pass
             time.sleep(1)
         raise CheckError("Expected native UI was not observed before the deadline")
 
@@ -307,7 +437,9 @@ def main():
             stage = "apk72_install_and_launch"
             guest.install(files[72])
             baseline = guest.package_info(72)
-            guest.launch()
+            report["installed"] = [baseline]
+            launches = report["launch"] = {"apk72": {}}
+            guest.launch(launches["apk72"])
             checks[stage] = "PASS"
             before_cache = None
             checks["synthetic_demo_cache"] = "NOT_RUN"
@@ -334,7 +466,8 @@ def main():
                 except (CheckError, sqlite3.Error, ValueError, OSError):
                     checks["synthetic_demo_cache"] = "UNVERIFIED"
             stage = "apk73_launch_after_update"
-            guest.launch()
+            launches["apk73"] = {}
+            guest.launch(launches["apk73"])
             guest.offline()
             checks[stage] = "PASS"
             if after_install_cache and checks["synthetic_demo_cache"] != "FAIL":

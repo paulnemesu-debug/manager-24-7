@@ -10,7 +10,7 @@ on:
       apk73_sha256:
         description: SHA-256 of the exact signed ARM64 APK 73
         type: string
-        required: true
+        required: false
       probe_demo_cache:
         description: Compare the known synthetic APK 72 HR cache before and after the upgrade
         type: boolean
@@ -23,6 +23,10 @@ on:
         description: Probe synthetic recipe PDF and gallery after the offline APK73 upgrade
         type: boolean
         default: false
+      probe_arm_host:
+        description: Check capabilities of an ARM64 runner without fetching APK inputs
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -32,7 +36,52 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  arm_host_probe:
+    if: ${{ inputs.probe_arm_host }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 4
+    permissions: {}
+    steps:
+      - name: Check reviewed ref and local ARM64 host capabilities
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == refs/heads/qa/apk73-native ]]
+          [[ "$EXPECTED_HEAD" =~ ^[a-fA-F0-9]{40}$ && "$GITHUB_SHA" == "${EXPECTED_HEAD,,}" ]]
+          [[ "$(uname -m)" == aarch64 ]]
+          kvm_device=false
+          kvm_open=false
+          if [[ -c /dev/kvm ]]; then
+            kvm_device=true
+            if [[ -r /dev/kvm && -w /dev/kvm ]] && (exec 3<>/dev/kvm) 2>/dev/null; then
+              kvm_open=true
+            fi
+          fi
+          sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          tool_present() {
+            if command -v "$1" >/dev/null 2>&1 || [[ -n "$sdk_root" && -x "$sdk_root/$2" ]]; then
+              printf true
+            else
+              printf false
+            fi
+          }
+          {
+            printf '### ARM64 runner capability probe\n\n'
+            printf 'Architecture: aarch64\n\n'
+            printf -- '- KVM character device: %s\n' "$kvm_device"
+            printf -- '- KVM device opened read/write: %s\n' "$kvm_open"
+            printf -- '- ADB available: %s\n' "$(tool_present adb platform-tools/adb)"
+            printf -- '- Android Emulator executable available: %s\n' "$(tool_present emulator emulator/emulator)"
+            printf -- '- SDK manager available: %s\n' "$(tool_present sdkmanager cmdline-tools/latest/bin/sdkmanager)"
+            printf -- '- AVD manager available: %s\n' "$(tool_present avdmanager cmdline-tools/latest/bin/avdmanager)"
+            printf -- '- AAPT available: %s\n' "$(tool_present aapt build-tools/36.0.0/aapt)"
+            printf -- '- APK signer available: %s\n' "$(tool_present apksigner build-tools/36.0.0/apksigner)"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
   upgrade:
+    if: ${{ !inputs.probe_arm_host }}
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:
