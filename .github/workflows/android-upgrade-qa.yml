@@ -140,7 +140,6 @@ jobs:
             sleep 2
           done
           [[ "$ready" == true ]]
-          "$adb" -s "$ANDROID_SERIAL" shell wm dismiss-keyguard
           qa_signer="$(python3 -c 'import json; print(json.load(open("scripts/qa/qa-package-proof.json"))["qaSignerSha256"])')"
           result=0
           timeout 900 python3 -B scripts/qa/native_qa_x86.py --execute \

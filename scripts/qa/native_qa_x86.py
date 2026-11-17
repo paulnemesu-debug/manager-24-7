@@ -19,6 +19,25 @@ spec.loader.exec_module(extra)
 native = extra.native
 
 
+def display_state(power, policy):
+    def one(text, key, allowed):
+        values = re.findall(r'^\s*' + re.escape(key) + r'=(\S+)\s*$', text or '', re.M)
+        return values[0] if len(values) == 1 and values[0] in allowed else 'UNKNOWN'
+    def boolean(text, key):
+        value = one(text, key, {'true', 'false'})
+        return value == 'true' if value != 'UNKNOWN' else None
+    keyguard = (policy or '').partition('KeyguardServiceDelegate')[2]
+    return {
+        'wakefulness': one(power, 'mWakefulness', {'Awake', 'Asleep', 'Dozing', 'Dreaming'}),
+        'displayReady': boolean(power, 'mDisplayReady'), 'stayOn': boolean(power, 'mStayOn'),
+        'keyguardShowing': boolean(keyguard, 'showing'),
+        'screenState': one(keyguard, 'screenState', {'SCREEN_STATE_OFF', 'SCREEN_STATE_TURNING_ON',
+                                                   'SCREEN_STATE_ON', 'SCREEN_STATE_TURNING_OFF'}),
+        'interactiveState': one(keyguard, 'interactiveState', {'INTERACTIVE_STATE_SLEEP', 'INTERACTIVE_STATE_WAKING',
+                                                             'INTERACTIVE_STATE_AWAKE', 'INTERACTIVE_STATE_GOING_TO_SLEEP'}),
+    }
+
+
 def verify_qa_proof(proof, sha, signer):
     pack_qa.require(all(re.fullmatch(r"[a-f0-9]{64}", value) for value in (sha, signer))
                     and signer != pack_qa.PRODUCT_SIGNER, "An exact QA-only artifact hash and test certificate are required")
@@ -34,6 +53,55 @@ def verify_qa_proof(proof, sha, signer):
 
 
 class X86QaGuest(extra.ExtraGuest):
+    def focus(self):
+        # API30 exposes current focus in DisplayContent, not the window-list dump.
+        window = self.probe('Foreground display', 'shell', 'dumpsys', 'window', 'displays')
+        if window is None:
+            return 'UNAVAILABLE'
+        fields = re.findall(r'^\s*mCurrentFocus=([^\n]*)$', window, re.M)
+        if not fields:
+            return 'FOCUS_FIELD_ABSENT'
+        if len(fields) != 1:
+            return 'AMBIGUOUS_FOCUS'
+        if fields[0].strip() == 'null':
+            return 'NO_FOCUSED_WINDOW'
+        match = re.fullmatch(r'Window\{[^\n}]*\bu(\d+)\s+([^\s}]+)\}', fields[0].strip())
+        if not match:
+            return 'UNRECOGNIZED_FOCUS'
+        return 'MAIN_ACTIVITY' if match[1] == '0' and match[2] in native.MAIN_COMPONENTS else 'OTHER_WINDOW'
+
+    def focused_app(self):
+        return self.focus() == 'MAIN_ACTIVITY'
+
+    def display_diagnostics(self):
+        return display_state(self.probe('Guest power state', 'shell', 'dumpsys', 'power'),
+                             self.probe('Guest keyguard state', 'shell', 'dumpsys', 'window', 'policy'))
+
+    def launch_diagnostics(self):
+        return {**super().launch_diagnostics(), 'focusDump': 'window displays', 'display': self.display_diagnostics()}
+
+    def prepare_display(self, evidence):
+        evidence.update(status='PREPARING', before=self.display_diagnostics())
+        self.run('Keep the disposable guest awake', 'shell', 'svc', 'power', 'stayon', 'true')
+        self.run('Dismiss disposable guest keyguard', 'shell', 'wm', 'dismiss-keyguard')
+        deadline = time.monotonic() + 10
+        after = evidence['before']
+        while time.monotonic() < deadline:
+            after = self.display_diagnostics()
+            if (after['wakefulness'] == 'Awake' and after['displayReady'] is True and after['keyguardShowing'] is False
+                    and after['screenState'] == 'SCREEN_STATE_ON' and after['interactiveState'] == 'INTERACTIVE_STATE_AWAKE'):
+                evidence.update(status='AWAKE_UNLOCKED', after=after)
+                return
+            time.sleep(0.5)
+        evidence.update(status='NOT_READY', after=after)
+        raise native.CheckError('Disposable guest display was not verified awake and unlocked')
+
+    def launch(self, evidence=None):
+        evidence = {} if evidence is None else evidence
+        self.prepare_display(evidence.setdefault('displayPreparation', {}))
+        # Keep exact MainActivity + visible Instant Demo + stable process readiness.
+        return super().launch(evidence)
+
     def verify_boot(self):
         native.require(self.property("ro.kernel.qemu") == "1"
                        and self.property("ro.product.cpu.abi") == "x86_64"
