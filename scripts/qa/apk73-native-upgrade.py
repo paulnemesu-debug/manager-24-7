@@ -290,6 +290,9 @@ class Emulator:
         require(re.search(r"^Success\s*$", result, re.M), "Android did not confirm APK installation")
 
     def package_info(self, version):
+        return self.package_info_for_abi(version, "arm64-v8a")
+
+    def package_info_for_abi(self, version, abi):
         info = self.run("Installed package identity", "shell", "dumpsys", "package", PACKAGE)
         observed = {}
         for key, pattern in {
@@ -302,7 +305,7 @@ class Emulator:
             require(match, "Installed package metadata is incomplete")
             observed[key] = match[1]
         require(observed["versionCode"] == str(version), "Installed version code was unexpected")
-        require(observed["primaryCpuAbi"] == "arm64-v8a", "Installed application ABI was not ARM64")
+        require(observed["primaryCpuAbi"] == abi, "Installed application ABI differs from the required runtime ABI")
         return observed
 
     def stop(self):

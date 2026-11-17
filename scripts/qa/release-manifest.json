@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "package": "ro.paradim.professionalfoodcost",
+  "versionCode": 74,
+  "versionName": "1.6.7",
+  "gitHead": "aced1866facb6337b1f29216bb5f1ba833704b23",
+  "sourceSnapshotSha256": "32893035cc4b127b915510f1fc2ccc688f1b537496480d6854950c5fa1e283d3",
+  "originalApkSha256": "d0a8d5274146dc0fbb5cf896d431c398926a0e0cedc5ef2ab3627b048ba3f8c4",
+  "originalSignerSha256": "b7125f9e38bd66ba1226b0ff063d15569320006f3b193a1da297d485deeec3ed",
+  "hbcSha256": "9e2c9bf720ba1568de2b7f40f6ecdc6b478a797881886b617624b4ecacfbf1b9",
+  "nativeLibraryCount": 28
+}

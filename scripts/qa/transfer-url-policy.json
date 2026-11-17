@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "transport": "private-drive",
+  "allowedOrigin": "https://sdmntpritalynorth.oaiusercontent.com",
+  "allowedPathPattern": "/files/[0-9a-f-]{36}/raw",
+  "allowedQueryKeys": ["se", "sp", "sv", "sr", "scid", "skoid", "sktid", "skt", "ske", "sks", "skv", "sig"],
+  "allowRedirects": false,
+  "status": "REVIEWED"
+}

@@ -354,14 +354,18 @@ def run_probes(args, report):
         guest.verify_live_bridge_receipt(prior, args.apk73_sha256)
         report["runtimeAdaptation"]["verifiedReceipt"] = True
 
-    observe = lambda name, selector, **options: guest.observe(name, args.evidence, selector, **options)
+    exercise_daily_forms(guest, args.evidence, report)
+
+
+def exercise_daily_forms(guest, evidence, report):
+    observe = lambda name, selector, **options: guest.observe(name, evidence, selector, **options)
     click = lambda name, names, **options: observe(name, lambda tree: control(tree, names, clickable=True),
                                                   tap=True, **options)
 
     def capture(name):
         visual = report["visualEvidence"]
         try:
-            guest.capture(name, args.evidence, SCREENSHOT_CHECKS[name])
+            guest.capture(name, evidence, SCREENSHOT_CHECKS[name])
         except (native.CheckError, OSError) as error:
             visual["unverified"][name] = str(error) if isinstance(error, native.CheckError) else type(error).__name__
         else:

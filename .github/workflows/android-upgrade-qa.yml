@@ -1,111 +1,77 @@
-name: Android APK 72 to 73 offline QA
-
+name: Android APK74 source-matched x86 QA
+run-name: APK74 x86 QA ${{ inputs.transfer_id }}
 on:
   workflow_dispatch:
     inputs:
       expected_head:
-        description: SHA of the reviewed QA branch commit that contains this workflow
+        description: Reviewed QA workflow commit (separate from release source HEAD)
         type: string
         required: true
-      apk73_sha256:
-        description: SHA-256 of the exact signed ARM64 APK 73
+      apk74_sha256:
+        description: Exact QA-only x86 APK74 SHA-256
         type: string
-        required: false
-      probe_demo_cache:
-        description: Compare the known synthetic APK 72 HR cache before and after the upgrade
-        type: boolean
-        default: true
-      run_functional_demo:
-        description: Exercise the fresh offline HACCP and HR demo after successful upgrade and cache verification
-        type: boolean
-        default: true
-      run_native_extra:
-        description: Probe synthetic recipe PDF and gallery after the offline APK73 upgrade
-        type: boolean
-        default: false
-      adapt_bridge_libraries:
-        description: Run only a separate file-based library compatibility test on the disposable x86_64 guest
-        type: boolean
-        default: false
-      probe_arm_host:
-        description: Check capabilities of an ARM64 runner without fetching APK inputs
-        type: boolean
-        default: false
-
+        required: true
+      transfer_id:
+        description: Non-secret receipt identifier used to correlate exactly one dispatch
+        type: string
+        required: true
 permissions:
   contents: read
-
 concurrency:
-  group: apk73-offline-native-qa
+  group: apk74-offline-x86-qa
   cancel-in-progress: false
-
 jobs:
-  arm_host_probe:
-    if: ${{ inputs.probe_arm_host }}
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 4
-    permissions: {}
-    steps:
-      - name: Check reviewed ref and local ARM64 host capabilities
-        shell: bash
-        env:
-          EXPECTED_HEAD: ${{ inputs.expected_head }}
-        run: |
-          set -euo pipefail
-          [[ "$GITHUB_REF" == refs/heads/qa/apk73-native ]]
-          [[ "$EXPECTED_HEAD" =~ ^[a-fA-F0-9]{40}$ && "$GITHUB_SHA" == "${EXPECTED_HEAD,,}" ]]
-          [[ "$(uname -m)" == aarch64 ]]
-          kvm_device=false
-          kvm_open=false
-          if [[ -c /dev/kvm ]]; then
-            kvm_device=true
-            if [[ -r /dev/kvm && -w /dev/kvm ]] && (exec 3<>/dev/kvm) 2>/dev/null; then
-              kvm_open=true
-            fi
-          fi
-          sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-          tool_present() {
-            if command -v "$1" >/dev/null 2>&1 || [[ -n "$sdk_root" && -x "$sdk_root/$2" ]]; then
-              printf true
-            else
-              printf false
-            fi
-          }
-          {
-            printf '### ARM64 runner capability probe\n\n'
-            printf 'Architecture: aarch64\n\n'
-            printf -- '- KVM character device: %s\n' "$kvm_device"
-            printf -- '- KVM device opened read/write: %s\n' "$kvm_open"
-            printf -- '- ADB available: %s\n' "$(tool_present adb platform-tools/adb)"
-            printf -- '- Android Emulator executable available: %s\n' "$(tool_present emulator emulator/emulator)"
-            printf -- '- SDK manager available: %s\n' "$(tool_present sdkmanager cmdline-tools/latest/bin/sdkmanager)"
-            printf -- '- AVD manager available: %s\n' "$(tool_present avdmanager cmdline-tools/latest/bin/avdmanager)"
-            printf -- '- AAPT available: %s\n' "$(tool_present aapt build-tools/36.0.0/aapt)"
-            printf -- '- APK signer available: %s\n' "$(tool_present apksigner build-tools/36.0.0/apksigner)"
-          } | tee -a "$GITHUB_STEP_SUMMARY"
-
-  upgrade:
-    if: ${{ !inputs.probe_arm_host }}
+  qa:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 35
     env:
       ANDROID_SERIAL: emulator-5554
-      APK73_SHA256: ${{ inputs.apk73_sha256 }}
+      APK74_SHA256: ${{ inputs.apk74_sha256 }}
     steps:
-      - name: Check the requested branch and commit
-        shell: bash
+      - name: Verify reviewed QA branch identity
         env:
           EXPECTED_HEAD: ${{ inputs.expected_head }}
+          TRANSFER_ID: ${{ inputs.transfer_id }}
+        shell: bash
         run: |
           set -euo pipefail
-          [[ "$GITHUB_REF" == refs/heads/qa/apk73-native ]]
-          [[ "$EXPECTED_HEAD" =~ ^[a-fA-F0-9]{40}$ && "$GITHUB_SHA" == "${EXPECTED_HEAD,,}" ]]
-          [[ "$APK73_SHA256" =~ ^[a-fA-F0-9]{64}$ ]]
-
+          [[ "$GITHUB_REF" == refs/heads/qa/apk74-x86 ]]
+          [[ "$EXPECTED_HEAD" =~ ^[a-f0-9]{40}$ && "$GITHUB_SHA" == "$EXPECTED_HEAD" ]]
+          [[ "$APK74_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$TRANSFER_ID" =~ ^[a-f0-9]{20}$ ]]
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Download only the reviewed QA APK74
+        env:
+          QA_APK74_DOWNLOAD_URL: ${{ secrets.QA_APK74_DOWNLOAD_URL }}
+          QA_APK74_URL_1: ${{ secrets.QA_APK74_URL_1 }}
+          QA_APK74_URL_2: ${{ secrets.QA_APK74_URL_2 }}
+          QA_APK74_URL_3: ${{ secrets.QA_APK74_URL_3 }}
+          QA_APK74_URL_4: ${{ secrets.QA_APK74_URL_4 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          export QA_APK_DIR="$RUNNER_TEMP/apk74-inputs"
+          printf 'QA_APK_DIR=%s\n' "$QA_APK_DIR" >> "$GITHUB_ENV"
+          python3 scripts/qa/prepare_qa.py --output "$QA_APK_DIR/apk74-qa.apk" \
+            --proof scripts/qa/qa-package-proof.json --expected-sha256 "$APK74_SHA256" \
+            --url-policy scripts/qa/transfer-url-policy.json
+
+      - name: Verify downloaded APK before emulator preparation
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools="$ANDROID_HOME/build-tools/36.0.0"
+          if [[ ! -x "$tools/aapt" || ! -f "$tools/lib/apksigner.jar" ]]; then
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'build-tools;36.0.0' </dev/null
+          fi
+          python3 scripts/qa/verify_download.py --apk "$QA_APK_DIR/apk74-qa.apk" \
+            --release-manifest scripts/qa/release-manifest.json --package-proof scripts/qa/qa-package-proof.json \
+            --expected-sha256 "$APK74_SHA256" --aapt "$tools/aapt" --java "$JAVA_HOME/bin/java" \
+            --apksigner-jar "$tools/lib/apksigner.jar"
 
       - name: Prepare the pinned Android system image and KVM
         shell: bash
@@ -116,7 +82,7 @@ jobs:
             sudo setfacl -m "u:$(id -un):rw" /dev/kvm
           fi
           [[ -r /dev/kvm && -w /dev/kvm ]]
-          avd_home="$RUNNER_TEMP/apk73-android-avd"
+          avd_home="$RUNNER_TEMP/apk74-android-avd"
           build_tools="$ANDROID_HOME/build-tools/36.0.0"
           image="$ANDROID_HOME/system-images/android-30/google_apis/x86_64"
           sdkmanager="$(command -v sdkmanager || true)"
@@ -131,51 +97,28 @@ jobs:
             --retry 2 --connect-timeout 20 --max-time 240 -o "$archive" \
             https://dl.google.com/android/repository/emulator-linux_x64-15917651.zip
           printf '%s  %s\n' '95771e0ae431897b2a4bd2d97fa095f29a8b0624a7b216baf529f9306161c266' "$archive" | sha256sum --check
-          mkdir -p "$avd_home" "$RUNNER_TEMP/apk73-emulator"
-          unzip -q "$archive" -d "$RUNNER_TEMP/apk73-emulator"
-          emulator="$RUNNER_TEMP/apk73-emulator/emulator/emulator"
+          mkdir -p "$avd_home" "$RUNNER_TEMP/apk74-emulator"
+          unzip -q "$archive" -d "$RUNNER_TEMP/apk74-emulator"
+          emulator="$RUNNER_TEMP/apk74-emulator/emulator/emulator"
           "$emulator" -accel-check | grep -Eq 'KVM.*(installed|usable)'
           export ANDROID_AVD_HOME="$avd_home"
           printf 'no\n' | "$(dirname "$sdkmanager")/avdmanager" create avd \
-            --name manager247_apk73 --package 'system-images;android-30;google_apis;x86_64' --device pixel_3a
+            --name manager247_apk74 --package 'system-images;android-30;google_apis;x86_64' --device pixel_3a
           printf 'ANDROID_AVD_HOME=%s\nQA_APK_DIR=%s\nQA_EMULATOR=%s\n' \
-            "$avd_home" "$RUNNER_TEMP/apk73-inputs" "$emulator" >> "$GITHUB_ENV"
+            "$avd_home" "$RUNNER_TEMP/apk74-inputs" "$emulator" >> "$GITHUB_ENV"
 
-      - name: Download and verify both original signed APKs
+      - name: Exercise offline HACCP attendance PDF and gallery
+        id: demo
         shell: bash
-        env:
-          QA_APK72_URL_1: ${{ secrets.QA_APK72_URL_1 }}
-          QA_APK72_URL_2: ${{ secrets.QA_APK72_URL_2 }}
-          QA_APK72_URL_3: ${{ secrets.QA_APK72_URL_3 }}
-          QA_APK72_URL_4: ${{ secrets.QA_APK72_URL_4 }}
-          QA_APK73_URL_1: ${{ secrets.QA_APK73_URL_1 }}
-          QA_APK73_URL_2: ${{ secrets.QA_APK73_URL_2 }}
-          QA_APK73_URL_3: ${{ secrets.QA_APK73_URL_3 }}
-          QA_APK73_URL_4: ${{ secrets.QA_APK73_URL_4 }}
-        run: |
-          set -euo pipefail
-          umask 077
-          build_tools="$ANDROID_HOME/build-tools/36.0.0"
-          python3 scripts/qa/apk73-native-upgrade.py prepare \
-            --apk-dir "$QA_APK_DIR" --report "$RUNNER_TEMP/apk73-provenance.json" \
-            --aapt "$build_tools/aapt" --apksigner "$build_tools/apksigner"
-
-      - name: Boot and test the original APKs offline
-        id: offline_smoke
-        shell: bash
-        env:
-          PROBE_DEMO_CACHE: ${{ inputs.probe_demo_cache }}
-          RUN_FUNCTIONAL_DEMO: ${{ inputs.run_functional_demo }}
-          RUN_NATIVE_EXTRA: ${{ inputs.run_native_extra }}
-          ADAPT_BRIDGE_LIBRARIES: ${{ inputs.adapt_bridge_libraries }}
         run: |
           set -euo pipefail
           adb="$ANDROID_HOME/platform-tools/adb"
-          build_tools="$ANDROID_HOME/build-tools/36.0.0"
-          report="$RUNNER_TEMP/apk73-native-report.json"
+          tools="$ANDROID_HOME/build-tools/36.0.0"
+          receiver="$RUNNER_TEMP/apk74-receiver"
+          mkdir -m 700 "$receiver"
+          cp scripts/qa/apk73-native-extra/receiver/{AndroidManifest.xml,PdfReceiverActivity.java,build.py} "$receiver/"
+          python3 "$receiver/build.py" --sdk "$ANDROID_HOME" --jdk "$JAVA_HOME"
           emulator_pid=
-          # Bash invokes this through the EXIT trap.
-          # shellcheck disable=SC2329
           cleanup() {
             if [[ -n "$emulator_pid" ]]; then
               timeout 10 "$adb" -s "$ANDROID_SERIAL" emu kill >/dev/null 2>&1 || true
@@ -183,137 +126,66 @@ jobs:
             fi
           }
           trap cleanup EXIT
-          "$QA_EMULATOR" -avd manager247_apk73 -port 5554 -accel on -gpu swiftshader \
+          "$QA_EMULATOR" -avd manager247_apk74 -port 5554 -accel on -gpu swiftshader \
             -no-window -no-snapshot -no-boot-anim -no-audio -camera-back none -camera-front none \
-            >"$RUNNER_TEMP/apk73-emulator.log" 2>&1 &
+            >"$RUNNER_TEMP/apk74-emulator.log" 2>&1 &
           emulator_pid=$!
           ready=false
           for ((attempt=0; attempt<90; attempt++)); do
             if ! kill -0 "$emulator_pid" 2>/dev/null; then break; fi
             if [[ "$(timeout 3 "$adb" -s "$ANDROID_SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)" == 1 ]] \
               && timeout 5 "$adb" -s "$ANDROID_SERIAL" shell service check package 2>/dev/null | grep -q 'Service package: found'; then
-              ready=true
-              break
+              ready=true; break
             fi
             sleep 2
           done
-          if [[ "$ready" != true ]]; then
-            echo 'Android boot or package service did not become ready. No APK was installed.' >&2
-            exit 1
-          fi
+          [[ "$ready" == true ]]
           "$adb" -s "$ANDROID_SERIAL" shell wm dismiss-keyguard
-          args=()
-          if [[ "$PROBE_DEMO_CACHE" == true ]]; then args+=(--probe-demo-cache); fi
-          compatibility_args=()
-          if [[ "$ADAPT_BRIDGE_LIBRARIES" == true ]]; then compatibility_args+=(--adapt-bridge-libraries); fi
+          qa_signer="$(python3 -c 'import json; print(json.load(open("scripts/qa/qa-package-proof.json"))["qaSignerSha256"])')"
           result=0
-          python3 scripts/qa/apk73-native-upgrade.py native "${args[@]}" "${compatibility_args[@]}" \
-            --apk-dir "$QA_APK_DIR" --report "$report" --adb "$adb" --serial "$ANDROID_SERIAL" \
-            --aapt "$build_tools/aapt" --apksigner "$build_tools/apksigner" || result=$?
-          native_result="$result"
-          if [[ -s "$report" ]]; then
-            {
-              if [[ "$ADAPT_BRIDGE_LIBRARIES" == true ]]; then
-                printf '### APK 72 to 73 emulator compatibility with extracted ARM64 libraries\n\n'
-              else
-                printf '### APK 72 to 73 native QA\n\n'
-              fi
-              sed 's/^/    /' "$report"
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
-          if [[ "$RUN_FUNCTIONAL_DEMO" == true && "$result" == 0 ]]; then
-            functional_dir="$RUNNER_TEMP/apk73-functional-evidence"
-            python3 scripts/qa/apk73-functional-qa.py --execute "${compatibility_args[@]}" \
-              --adb "$adb" --serial "$ANDROID_SERIAL" --upgrade-report "$report" \
-              --apk73-sha256 "${APK73_SHA256,,}" --evidence "$functional_dir" || result=$?
-            {
-              printf '\n### Fresh offline demo on APK 73\n\n'
-              if [[ -s "$functional_dir/functional-report.json" ]]; then
-                sed 's/^/    /' "$functional_dir/functional-report.json"
-              else
-                printf 'INCOMPLETE. The helper did not produce a report.\n'
-              fi
-              if [[ "$result" != 0 && -d "$functional_dir" ]]; then
-                observation="$(find "$functional_dir" -maxdepth 1 -type f -name '*-unverified.xml' -print -quit)"
-                if [[ -n "$observation" ]]; then
-                  printf '\nSanitized UI snapshot excerpt (up to 60 lines).\n\n'
-                  awk 'NR <= 60 { print "    " substr($0, 1, 360) }' "$observation"
-                fi
-              fi
-            } >> "$GITHUB_STEP_SUMMARY"
-          elif [[ "$RUN_FUNCTIONAL_DEMO" == true ]]; then
-            printf '\n### Fresh offline demo on APK 73\n\nNOT_RUN. Package upgrade and cache verification did not pass.\n' \
-              >> "$GITHUB_STEP_SUMMARY"
-          fi
-          if [[ "$RUN_NATIVE_EXTRA" == true && "$native_result" == 0 ]]; then
-            extra_dir="$RUNNER_TEMP/apk73-native-extra"
-            mkdir -m 700 "$extra_dir"
-            mkdir -m 700 "$extra_dir/receiver"
-            cp -- scripts/qa/apk73-native-extra/receiver/AndroidManifest.xml \
-              scripts/qa/apk73-native-extra/receiver/PdfReceiverActivity.java \
-              scripts/qa/apk73-native-extra/receiver/build.py "$extra_dir/receiver/"
-            extra_result=0
-            python3 "$extra_dir/receiver/build.py" --sdk "$ANDROID_HOME" --jdk "${JAVA_HOME:-}" || extra_result=$?
-            if [[ "$extra_result" == 0 ]]; then
-              timeout 660 python3 -B scripts/qa/apk73_native_extra.py --execute "${compatibility_args[@]}" \
-                --adb "$adb" --serial "$ANDROID_SERIAL" --upgrade-report "$report" \
-                --apk73-sha256 "${APK73_SHA256,,}" --report "$extra_dir/recipe-native-report.json" \
-                --receiver-apk "$extra_dir/receiver/out/qa-pdf-sink.apk" \
-                --receiver-evidence "$extra_dir/receiver/out/build-evidence.json" \
-                --aapt "$build_tools/aapt" || extra_result=$?
+          timeout 900 python3 -B scripts/qa/native_qa_x86.py --execute \
+            --release-manifest scripts/qa/release-manifest.json --package-proof scripts/qa/qa-package-proof.json \
+            --apk "$QA_APK_DIR/apk74-qa.apk" --expected-sha256 "$APK74_SHA256" --expected-signer-sha256 "$qa_signer" \
+            --adb "$adb" --serial "$ANDROID_SERIAL" --aapt "$tools/aapt" --java "$JAVA_HOME/bin/java" \
+            --apksigner-jar "$tools/lib/apksigner.jar" --receiver-apk "$receiver/out/qa-pdf-sink.apk" \
+            --receiver-evidence "$receiver/out/build-evidence.json" --evidence "$RUNNER_TEMP/apk74-evidence" || result=$?
+          {
+            printf '### APK74 source-matched x86 demo QA\n\nOriginal ARM64 runtime acceptance: NOT_VERIFIED. Upgrade acceptance: NOT_RUN.\n\n'
+            if [[ -f "$RUNNER_TEMP/apk74-evidence/native-x86-qa-report.json" ]]; then
+              sed 's/^/    /' "$RUNNER_TEMP/apk74-evidence/native-x86-qa-report.json"
+            else
+              printf 'INCOMPLETE: no verified demo report.\n'
             fi
-            {
-              printf '\n### Offline synthetic recipe PDF and gallery\n\n'
-              if [[ -s "$extra_dir/recipe-native-report.json" ]]; then
-                sed 's/^/    /' "$extra_dir/recipe-native-report.json"
-              else
-                printf 'INCOMPLETE. Receiver build, guest probe, or report generation did not finish.\n'
-              fi
-            } >> "$GITHUB_STEP_SUMMARY"
-            if [[ "$result" == 0 ]]; then result="$extra_result"; fi
-          elif [[ "$RUN_NATIVE_EXTRA" == true ]]; then
-            printf '\n### Offline synthetic recipe PDF and gallery\n\nNOT_RUN. Original APK upgrade and cache verification did not pass.\n' \
-              >> "$GITHUB_STEP_SUMMARY"
-          fi
+          } >> "$GITHUB_STEP_SUMMARY"
           exit "$result"
 
-      - name: Select completed synthetic demo screenshots
-        id: visual_evidence
-        if: ${{ !cancelled() && inputs.run_functional_demo && (steps.offline_smoke.outcome == 'success' || steps.offline_smoke.outcome == 'failure') }}
+      - name: Select approved synthetic screenshots
+        id: images
+        if: ${{ !cancelled() && (steps.demo.outcome == 'success' || steps.demo.outcome == 'failure') }}
         shell: bash
         run: |
           set -euo pipefail
-          images="$(python3 scripts/qa/apk73-functional-qa.py --list-screenshots "$RUNNER_TEMP/apk73-functional-evidence")"
+          images="$(python3 scripts/qa/apk73-functional-qa.py --list-screenshots "$RUNNER_TEMP/apk74-evidence")"
           if [[ -n "$images" ]]; then
-            printf 'paths<<APK73_PNG_PATHS\n%s\nAPK73_PNG_PATHS\n' "$images" >> "$GITHUB_OUTPUT"
+            printf 'paths<<QA_IMAGES\n%s\nQA_IMAGES\n' "$images" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Upload approved synthetic demo screenshots
-        if: ${{ !cancelled() && steps.visual_evidence.outputs.paths != '' }}
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        if: ${{ !cancelled() && steps.images.outputs.paths != '' }}
         with:
-          name: ${{ inputs.adapt_bridge_libraries && 'apk73-adapted-emulator-demo-screenshots' || 'apk73-offline-demo-screenshots' }}
-          path: ${{ steps.visual_evidence.outputs.paths }}
+          name: apk74-x86-synthetic-demo-screenshots
+          path: ${{ steps.images.outputs.paths }}
           if-no-files-found: error
           retention-days: 1
-
-      - name: Remove temporary APK inputs, AVD and demo evidence
+      - name: Remove temporary QA inputs and guest
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          runner_root="$(realpath -e -- "$RUNNER_TEMP")"
-          [[ -d "$runner_root" && "$runner_root" != / ]]
-          inputs="$runner_root/apk73-inputs"
-          avd="$runner_root/apk73-android-avd"
-          functional_dir="$runner_root/apk73-functional-evidence"
-          extra_dir="$runner_root/apk73-native-extra"
-          for directory in "$inputs" "$avd" "$functional_dir" "$extra_dir"; do
-            [[ ! -L "$directory" && "$(realpath -m -- "$directory")" == "$directory" ]]
-            [[ ! -e "$directory" || -d "$directory" ]]
+          root="$(realpath -e -- "$RUNNER_TEMP")"
+          [[ -d "$root" && "$root" != / ]]
+          for name in apk74-inputs apk74-android-avd apk74-evidence apk74-receiver; do
+            path="$root/$name"
+            [[ ! -L "$path" && "$(realpath -m -- "$path")" == "$path" ]]
+            if [[ -d "$path" ]]; then rm -rf -- "$path"; fi
           done
-          rm -f -- "$inputs/apk72.apk" "$inputs/apk73.apk" \
-            "$inputs/apk72.download" "$inputs/apk73.download"
-          for directory in "$avd" "$functional_dir" "$extra_dir"; do
-            if [[ -d "$directory" ]]; then rm -rf -- "$directory"; fi
-          done
+
